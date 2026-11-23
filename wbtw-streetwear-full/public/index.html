@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="description" content="WBTW — Worn by the Wise. Streetwear designed with purpose.">
+    <title>
+      WBTW® — Worn by the Wise
+    </title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <div class="ticker">
+      <div class="ticker-track">
+        <span>
+          WORN BY THE WISE
+        </span>
+        <i>
+          ✳
+        </i>
+        <span>
+          DESIGNED WITH PURPOSE
+        </span>
+        <i>
+          ✳
+        </i>
+        <span>
+          MADE TO BE WORN WITH CONFIDENCE
+        </span>
+        <i>
+          ✳
+        </i>
+        <span>
+          WORN BY THE WISE
+        </span>
+        <i>
+          ✳
+        </i>
+        <span>
+          DESIGNED WITH PURPOSE
+        </span>
+        <i>
+          ✳
+        </i>
+      </div>
+    </div>
+    <header class="site-header" id="header">
+      <button class="icon-btn menu-toggle" id="menuToggle" aria-label="Open menu">
+        ☰
+      </button>
+      <a class="wordmark" href="/">
+        <span>
+      
+        </span>
+    
+      </a>
+      <nav class="main-nav">
+        <a href="#shop" data-cat="All">
+          SHOP ALL
+        </a>
+        <a href="#shop" data-cat="Shirts">
+          SHIRTS
+        </a>
+        <a href="#shop" data-cat="Hoodies">
+          HOODIES
+        </a>
+        <a href="#manifesto">
+          OUR STORY
+        </a>
+      </nav>
+      <div class="header-tools">
+        <button class="icon-btn" id="searchToggle" aria-label="Search">
+          ⌕
+        </button>
+        <button class="icon-btn bag-button" id="bagToggle" aria-label="Shopping bag">
+          BAG
+          <b id="bagCount">
+            0
+          </b>
+        </button>
+      </div>
+    </header>
+    <div class="mobile-menu" id="mobileMenu">
+      <a href="#shop" data-cat="All">
+        SHOP ALL
+      </a>
+      <a href="#shop" data-cat="Shirts">
+        SHIRTS
+      </a>
+      <a href="#shop" data-cat="Hoodies">
+        HOODIES
+      </a>
+      <a href="#manifesto">
+        OUR STORY
+      </a>
+    </div>
+    <div class="search-bar" id="searchBar">
+      <input id="searchInput" placeholder="Search shirts and hoodies..." aria-label="Search products">
+      <button id="searchClose">
+        CLOSE ×
+      </button>
+    </div>
+    <main>
+      <section class="hero">
+        <div class="hero-copy reveal">
+          <p class="kicker">
+            INDEPENDENT STREETWEAR · EST. WBTW
+          </p>
+          <h1>
+            OWN YOUR
+            <br>
+            <em>
+              POINT OF VIEW.
+            </em>
+          </h1>
+          <p class="hero-desc">
+            Not made to fit in. Made to move with purpose. Discover everyday pieces built around confidence, individuality and the culture of streetwear.
+          </p>
+          <a class="pill-button" href="#shop">
+            SHOP THE COLLECTION
+            <span>
+              ↗
+            </span>
+          </a>
+          <div class="hero-index">
+          </div>
+        </div>
+        <div class="hero-visual">
+          <div class="hero-photo photo-one">
+          </div>
+          <div class="hero-photo photo-two">
+          </div>
+          <div class="vertical-note">
+            CONFIDENCE IN EVERY PIECE — WBTW
+          </div>
+        </div>
+        <div class="hero-bottomline">
+          <span>
+            BUILT DIFFERENT. WORN DIFFERENT.
+          </span>
+          <span>
+            SCROLL TO EXPLORE ↓
+          </span>
+        </div>
+      </section>
+      <section class="category-strip reveal">
+        <a href="#shop" data-cat="Shirts" class="category-card category-shirt">
+          <span class="cat-no">
+            01 / CATEGORY
+          </span>
+          <strong>
+            SHIRTS
+          </strong>
+          <span class="cat-link">
+            EXPLORE ↗
+          </span>
+        </a>
+        <a href="#shop" data-cat="Hoodies" class="category-card category-hoodie">
+          <span class="cat-no">
+            02 / CATEGORY
+          </span>
+          <strong>
+            HOODIES
+          </strong>
+          <span class="cat-link">
+            EXPLORE ↗
+          </span>
+        </a>
+      </section>
+      <section class="shop-section" id="shop">
+        <div class="section-top reveal">
+          <div>
+            <p class="kicker">
+              THE WBTW SELECTION
+            </p>
+            <h2>
+              FRESH FROM
+              <br>
+              <em>
+                THE DROP.
+              </em>
+            </h2>
+          </div>
+          <p class="section-aside">
+            CONSIDERED FITS.
+            <br>
+            EVERYDAY UNIFORMS.
+            <br>
+            NO SHORTCUTS.
+          </p>
+        </div>
+        <div class="shop-controls reveal">
+          <div class="filter-tabs">
+            <button class="filter active" data-filter="All">
+              ALL PIECES
+              <sup id="allCount">
+                00
+              </sup>
+            </button>
+            <button class="filter" data-filter="Shirts">
+              SHIRTS
+            </button>
+            <button class="filter" data-filter="Hoodies">
+              HOODIES
+            </button>
+          </div>
+          <select id="sortSelect" aria-label="Sort products">
+            <option value="featured">
+              FEATURED
+            </option>
+            <option value="newest">
+              NEWEST
+            </option>
+            <option value="low">
+              PRICE: LOW TO HIGH
+            </option>
+            <option value="high">
+              PRICE: HIGH TO LOW
+            </option>
+          </select>
+        </div>
+        <div class="product-grid" id="productGrid">
+          <div class="loading">
+            LOADING THE DROP...
+          </div>
+        </div>
+      </section>
+      <section class="campaign reveal" id="manifesto">
+        <div class="campaign-image">
+        </div>
+        <div class="campaign-copy">
+          <p class="kicker">
+            A DIFFERENT KIND OF UNIFORM
+          </p>
+          <h2>
+            DESIGNED
+            <br>
+            WITH
+            <em>
+              PURPOSE.
+            </em>
+          </h2>
+          <p>
+            Worn by the Wise is more than what you put on. It's how you carry yourself. We create pieces for people who trust their own direction, value their individuality and wear their confidence without asking permission.
+          </p>
+          <a class="line-link" href="#shop">
+            DISCOVER THE WBTW WAY
+            <span>
+              ↗
+            </span>
+          </a>
+          <div class="campaign-mark">
+            WBTW®
+          </div>
+        </div>
+      </section>
+      <section class="statement reveal">
+        <p class="kicker">
+          THE WBTW MINDSET
+        </p>
+        <h2>
+          BE YOUR OWN
+          <br>
+          <em>
+            STANDARD.
+          </em>
+        </h2>
+        <div class="statement-foot">
+          <span>
+            WORN BY THE WISE®
+          </span>
+          <span>
+            EST. FOR THE EVERYDAY ORIGINAL
+          </span>
+        </div>
+      </section>
+      <section class="newsletter reveal">
+        <div>
+          <p class="kicker">
+            GET IN THE LOOP
+          </p>
+          <h2>
+            DON'T MISS
+            <br>
+            THE NEXT DROP.
+          </h2>
+        </div>
+        <form id="newsletterForm">
+          <label for="email">
+            BE FIRST TO KNOW ABOUT NEW RELEASES.
+          </label>
+          <div class="email-line">
+            <input id="email" type="email" placeholder="YOUR EMAIL ADDRESS" required>
+            <button>
+              JOIN THE LIST ↗
+            </button>
+          </div>
+          <small id="newsletterMsg">
+            NO SPAM. JUST GOOD THINGS.
+          </small>
+        </form>
+      </section>
+    </main>
+    <footer>
+      <a class="wordmark footer-logo" href="/">
+        <span>
+        </span>
+      </a>
+      <div class="footer-links">
+        <a href="#shop">
+          SHOP
+        </a>
+        <a href="#manifesto">
+          OUR STORY
+        </a>
+        <a href="https://instagram.com/" target="_blank" rel="noreferrer">
+          INSTAGRAM ↗
+        </a>
+        <a href="/admin">
+          ADMIN
+        </a>
+      </div>
+      <p>
+        ©
+        <span id="year">
+        </span>
+        WBTW. ALL RIGHTS RESERVED.
+      </p>
+    </footer>
+    <div class="scrim" id="scrim">
+    </div>
+    <aside class="cart-drawer" id="cartDrawer">
+      <div class="drawer-head">
+        <h3>
+          YOUR BAG
+          <span id="drawerCount">
+            (0)
+          </span>
+        </h3>
+        <button id="cartClose" class="icon-btn">
+          ×
+        </button>
+      </div>
+      <div id="cartLines" class="cart-lines">
+        <p class="empty-cart">
+          YOUR BAG IS EMPTY.
+        </p>
+      </div>
+      <div class="drawer-bottom">
+        <div class="subtotal">
+          <span>
+            SUBTOTAL
+          </span>
+          <strong id="subtotal">
+            ₱0
+          </strong>
+        </div>
+        <p>
+          Shipping and delivery details are confirmed after order submission.
+        </p>
+        <button class="pill-button checkout-btn" id="checkoutOpen">
+          CONTINUE TO CHECKOUT ↗
+        </button>
+      </div>
+    </aside>
+    <div class="modal" id="productModal">
+      <div class="modal-card product-modal-card">
+        <button class="modal-x" data-close="productModal">
+          ×
+        </button>
+        <div id="productModalContent">
+        </div>
+      </div>
+    </div>
+    <div class="modal" id="checkoutModal">
+      <div class="modal-card checkout-card">
+        <button class="modal-x" data-close="checkoutModal">
+          ×
+        </button>
+        <p class="kicker">
+          WBTW ORDER REQUEST
+        </p>
+        <h3>
+          CHECKOUT
+        </h3>
+        <form id="checkoutForm">
+          <label>
+            FULL NAME
+            <input name="customer_name" required>
+          </label>
+          <label>
+            MOBILE NUMBER
+            <input name="phone" required placeholder="09XX XXX XXXX">
+          </label>
+          <label>
+            DELIVERY ADDRESS
+            <textarea name="address" rows="3" required>
+            </textarea>
+          </label>
+          <button class="pill-button" type="submit">
+            SUBMIT ORDER REQUEST ↗
+          </button>
+          <p class="form-note">
+            This submits an order request to the store. Online card payments are not enabled in this starter build.
+          </p>
+        </form>
+      </div>
+    </div>
+    <script src="/store.js">
+    </script>
+  </body>
+</html>

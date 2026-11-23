@@ -1,0 +1,34 @@
+Data Types
+String = ""
+Integer = whole number . w/o decimal value
+float = numbers with decimal value -Pi 3.14
+Boolean = true or false
+
+Variables - container, temporary memories
+user - Define :name
+case - sensitive : maarte
+mutable - nagbago
+dynamic - pwedeng iba iba ang value
+start : letter _ , not with : number , s.char
+
+Operators : Arithmetic Operators
+Addition    	: +
+Subtraction 	: -
+Multiplication  : *
+Division 	: /
+Exponents 	: **
+Modulus 	: % remainder
+Floor Division 	: // 
+
+Comparison Operators : this compares values True or False
+Equal to 	: ==
+Not equal to 	: !=
+Greaterthan	: >
+Lessthan 	: <
+GTET 		: >=
+LTET	 	: <=
+
+
+Integer = whole number . w/o decimal value
+
+
