@@ -89,7 +89,7 @@ height:80px}
   left: 2px;
   width: 160px;
   height: 45px;
-  background-image: url("Images/WBTW_logo_white.png");
+  background-image: url("images/WBTW_logo_white.png");
   background-size: contain;
   background-repeat: no-repeat;
   background-position: top left;
@@ -197,7 +197,7 @@ font-size:12px}
 cursor:pointer}
 
 .hero {
-  background-image: url(Images/Main_Hero_Banner.png);
+  background-image: url(images/Main_Hero_Banner.png);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -939,7 +939,7 @@ overflow:hidden}
   display:block}
 
   .footer .wordmark::before {
-  background: url("Images/WBTW_logo_white.png") center / contain no-repeat;
+  background: url("images/WBTW_logo_white.png") center / contain no-repeat;
   position: absolute;
   top: 0;
   left: 0;
