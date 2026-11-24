@@ -1045,17 +1045,29 @@ MOBILE STYLES (max-width: 620px)
     top:68px
   }
   .hero {
-    display:flex;
-    flex-direction:column;
-    padding:58px 5vw 50px;
-    min-height:0;
+    /* Mobile hero banner stays fixed; only content position is adjustable */
+    --mobile-hero-banner-height: 680px;
+    position:relative;
+    display:block;
+    height:var(--mobile-hero-banner-height);
+    min-height:var(--mobile-hero-banner-height);
+    padding:0;
+    overflow:hidden;
     background-image: var(--hero-image-mobile);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
   }
   .hero-copy {
-    /* Adjust to move hero text/content down on mobile only */
-    --mobile-hero-content-offset: 30px;
-    margin-top: var(--mobile-hero-content-offset);
-    padding:0 0 35px
+    /* Adjust to move hero text/content up/down on mobile only (banner unaffected) */
+    --mobile-hero-content-top: 90px;
+    position:absolute;
+    top:var(--mobile-hero-content-top);
+    left:5vw;
+    right:5vw;
+    z-index:2;
+    margin:0;
+    padding:0;
   }
   .hero h1 {
     font-size:clamp(66px,17vw,100px)
@@ -1067,30 +1079,15 @@ MOBILE STYLES (max-width: 620px)
     position:static;
     margin-top:28px
   }
-  .hero-visual {
-    min-height:370px;
-    margin:0 -1vw
-  }
-  .photo-one {
-    inset:0 10% 6% 5%
-  }
-  .photo-two {
-    width:34%;
-    height:43%;
-    right:1%;
-    bottom:0;
-    border-width:6px
-  }
-  .hero-stamp {
-    font-size:42px;
-    right:0
-  }
   .vertical-note {
     right:-4vw
   }
   .hero-bottomline {
-    position:static;
-    margin-top:22px;
+    position:absolute;
+    left:5vw;
+    right:5vw;
+    bottom:20px;
+    margin:0;
     font-size:7px
   }
   .category-strip {
