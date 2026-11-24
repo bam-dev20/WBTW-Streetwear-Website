@@ -197,7 +197,9 @@ font-size:12px}
 cursor:pointer}
 
 .hero {
-  background-image: url(Main_Hero_Banner_mob.png);
+  --hero-image-desktop: url(images/Main_Hero_Banner.png);
+  --hero-image-mobile: url(images/Main_Hero_Banner_mob.png);
+  background-image: var(--hero-image-desktop);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -992,7 +994,8 @@ overflow:hidden}
     display:flex;
     flex-direction:column;
     padding:58px 5vw 50px;
-  min-height:0}
+    min-height:0;
+  background-image: var(--hero-image-mobile);}
 
   .hero-copy {
   padding:0 0 35px}
