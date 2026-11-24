@@ -1054,7 +1054,7 @@ MOBILE STYLES (max-width: 620px)
   .hero-copy {
     /* Adjust to move hero text/content down on mobile only */
     --mobile-hero-content-offset: 0px;
-    margin-top:430px;
+    margin-top:0px;
     padding:0 0 35px
   }
   .hero h1 {
