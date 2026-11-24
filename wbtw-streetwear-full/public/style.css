@@ -172,7 +172,7 @@ display:none}
   display:none;
   position:sticky;
   top:82px;
-  background:var(--paper);
+  background:var(--gray);
   z-index:19;
   padding:18px 5vw;
 border-bottom:1px solid var(--line)}
@@ -197,7 +197,7 @@ font-size:12px}
 cursor:pointer}
 
 .hero {
-  background-image: url(images/Main_Hero_Banner.png);
+  background-image: url(Main_Hero_Banner_mob.png);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
