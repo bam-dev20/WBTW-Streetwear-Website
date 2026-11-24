@@ -82,6 +82,7 @@ height:80px}
   height: 45px;
   padding-left: 3px;
 }
+
 .wordmark::before {
   content: "";
   position: absolute;
@@ -108,6 +109,35 @@ height:80px}
   left: 30px;
   top: 20px;
   white-space: nowrap;
+}
+
+/* =========================================
+DESKTOP MAIN LOGO
+========================================= */
+.site-header .wordmark {
+  /* Adjust desktop header logo container */
+  --desktop-logo-container-width: 160px;
+  --desktop-logo-container-height: 45px;
+
+  width: var(--desktop-logo-container-width);
+  height: var(--desktop-logo-container-height);
+}
+
+.site-header .wordmark::before {
+  /* Adjust desktop header logo image */
+  --desktop-logo-width: 160px;
+  --desktop-logo-height: 45px;
+  --desktop-logo-top: 3px;
+  --desktop-logo-left: 2px;
+
+  width: var(--desktop-logo-width);
+  height: var(--desktop-logo-height);
+  top: var(--desktop-logo-top);
+  left: var(--desktop-logo-left);
+  background-image: url("images/WBTW_logo_white.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: top left;
 }
 
 .main-nav {
@@ -963,7 +993,7 @@ overflow:hidden}
   font-size:9px}
 
   .mobile-menu {
-    position:absolute;
+    position:fixed;
     top:93px;
     left:0;
     right:0;
@@ -986,6 +1016,35 @@ overflow:hidden}
     font-size:11px;
     font-weight:700;
   letter-spacing:.14em}
+
+  /* =========================================
+  MOBILE MAIN LOGO
+  ========================================= */
+  .site-header .wordmark {
+    /* Adjust mobile header logo container */
+    --mobile-logo-container-width: 160px;
+    --mobile-logo-container-height: 45px;
+
+    width: var(--mobile-logo-container-width);
+    height: var(--mobile-logo-container-height);
+  }
+
+  .site-header .wordmark::before {
+    /* Adjust mobile header logo image */
+    --mobile-logo-width: 160px;
+    --mobile-logo-height: 45px;
+    --mobile-logo-top: 3px;
+    --mobile-logo-left: 2px;
+
+    width: var(--mobile-logo-width);
+    height: var(--mobile-logo-height);
+    top: var(--mobile-logo-top);
+    left: var(--mobile-logo-left);
+    background-image: url("images/WBTW_logo_white.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: top left;
+  }
 
   .search-bar {
   top:68px}
@@ -1142,7 +1201,7 @@ overflow:hidden}
   gap:8px}
 
   .product-modal-card img {
-    background:;
+    background:"";
     max-height:320px;
   aspect-ratio:4/3}
 
