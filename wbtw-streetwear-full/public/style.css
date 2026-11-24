@@ -1060,7 +1060,7 @@ MOBILE STYLES (max-width: 620px)
   }
   .hero-copy {
     /* Adjust to move hero text/content up/down on mobile only (banner unaffected) */
-    --mobile-hero-content-top: 150px;
+    --mobile-hero-content-top: 200px;
     position:absolute;
     top:var(--mobile-hero-content-top);
     left:5vw;
