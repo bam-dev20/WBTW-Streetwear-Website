@@ -1053,7 +1053,7 @@ MOBILE STYLES (max-width: 620px)
   }
   .hero-copy {
     /* Adjust to move hero text/content down on mobile only */
-    --mobile-hero-content-offset: 100px;
+    --mobile-hero-content-offset: 30px;
     margin-top: var(--mobile-hero-content-offset);
     padding:0 0 35px
   }
