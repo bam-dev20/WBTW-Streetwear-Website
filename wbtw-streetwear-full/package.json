@@ -28,3 +28,6 @@
     "sqlite3@5.1.7": true
   }
 }
+"scripts": {
+  "start": "node server.js"
+}
