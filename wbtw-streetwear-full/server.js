@@ -191,4 +191,6 @@ app.patch("/api/admin/orders/:id",requireAdmin,(req,res)=>{
 app.get("/admin",(req,res)=>res.sendFile(path.join(ROOT,"public","admin","index.html")));
 app.get("/health",(req,res)=>res.json({ok:true}));
 app.use((err,req,res,next)=>{console.error(err);res.status(400).json({error:err.message||"Something went wrong."});});
-app.listen(PORT,()=>console.log(`WBTW store running at http://localhost:${PORT}`));
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`WBTW store running on port ${PORT}`);
+});
