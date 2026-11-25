@@ -11,6 +11,10 @@ const path = require("path");
 const fs = require("fs");
 
 const app = express();
+
+// Railway reverse proxy configuration
+app.set("trust proxy", 1);
+
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
 const db = new Database(path.join(ROOT, "data", "wbtw.sqlite"));
