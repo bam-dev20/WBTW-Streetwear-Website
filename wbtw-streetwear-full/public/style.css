@@ -1217,3 +1217,149 @@ MOBILE STYLES (max-width: 620px)
   }
 
 }
+
+/* =========================================================
+   MANUAL PRODUCT IMAGE OVERRIDES (CSS, NO ADMIN REQUIRED)
+   ---------------------------------------------------------
+   Use this section to manually set product images without
+   relying on the admin panel.
+
+   How it works:
+   1. Put your image file in: wbtw-streetwear-full/public/images/
+      (or use any valid URL/path like /uploads/your-file.jpg)
+   2. Find the product ID (data-id) for each product in the list.
+   3. Copy one block below per product and replace:
+      - PRODUCT_ID with the product's ID number
+      - the image path/url inside url("...")
+   4. Keep the matching "opacity: 0" rule so the default <img>
+      is hidden and your manual image shows.
+
+   These overrides apply to:
+   - Product listing cards
+   - Product quick-view/modal image
+   - Cart item thumbnails
+
+   Tip: you can add more blocks for any product ID in your catalog.
+   ========================================================= */
+
+/* Example template (copy and edit):
+.product-card[data-id="PRODUCT_ID"] .product-media,
+#productModalContent[data-product-id="PRODUCT_ID"] .modal-product-image-wrap,
+.cart-line[data-product-id="PRODUCT_ID"] {
+  --manual-product-image: none;
+}
+.product-card[data-id="PRODUCT_ID"] .product-media {
+  background-image: url("images/your-image.jpg");
+  background-size: cover;
+  background-position: center;
+}
+.product-card[data-id="PRODUCT_ID"] .product-media .product-image {
+  opacity: 0;
+}
+#productModalContent[data-product-id="PRODUCT_ID"] .modal-product-image {
+  content: url("images/your-image.jpg");
+  object-fit: cover;
+}
+.cart-line[data-product-id="PRODUCT_ID"] .cart-product-image {
+  content: url("images/your-image.jpg");
+  object-fit: cover;
+}
+*/
+
+/* ----- PRODUCT ID 1 ----- */
+/*
+.product-card[data-id="1"] .product-media {
+  background-image: url("images/product-1.jpg");
+  background-size: cover;
+  background-position: center;
+}
+.product-card[data-id="1"] .product-media .product-image { opacity: 0; }
+#productModalContent[data-product-id="1"] .modal-product-image { content: url("images/product-1.jpg"); object-fit: cover; }
+.cart-line[data-product-id="1"] .cart-product-image { content: url("images/product-1.jpg"); object-fit: cover; }
+*/
+
+/* ----- PRODUCT ID 2 ----- */
+/*
+.product-card[data-id="2"] .product-media {
+  background-image: url("images/product-2.jpg");
+  background-size: cover;
+  background-position: center;
+}
+.product-card[data-id="2"] .product-media .product-image { opacity: 0; }
+#productModalContent[data-product-id="2"] .modal-product-image { content: url("images/product-2.jpg"); object-fit: cover; }
+.cart-line[data-product-id="2"] .cart-product-image { content: url("images/product-2.jpg"); object-fit: cover; }
+*/
+
+/* ----- PRODUCT ID 3 ----- */
+/*
+.product-card[data-id="3"] .product-media {
+  background-image: url("images/product-3.jpg");
+  background-size: cover;
+  background-position: center;
+}
+.product-card[data-id="3"] .product-media .product-image { opacity: 0; }
+#productModalContent[data-product-id="3"] .modal-product-image { content: url("images/product-3.jpg"); object-fit: cover; }
+.cart-line[data-product-id="3"] .cart-product-image { content: url("images/product-3.jpg"); object-fit: cover; }
+*/
+
+/* ----- PRODUCT ID 4 ----- */
+/*
+.product-card[data-id="4"] .product-media {
+  background-image: url("images/product-4.jpg");
+  background-size: cover;
+  background-position: center;
+}
+.product-card[data-id="4"] .product-media .product-image { opacity: 0; }
+#productModalContent[data-product-id="4"] .modal-product-image { content: url("images/product-4.jpg"); object-fit: cover; }
+.cart-line[data-product-id="4"] .cart-product-image { content: url("images/product-4.jpg"); object-fit: cover; }
+*/
+
+/* ----- PRODUCT ID 5 ----- */
+/*
+.product-card[data-id="5"] .product-media {
+  background-image: url("images/product-5.jpg");
+  background-size: cover;
+  background-position: center;
+}
+.product-card[data-id="5"] .product-media .product-image { opacity: 0; }
+#productModalContent[data-product-id="5"] .modal-product-image { content: url("images/product-5.jpg"); object-fit: cover; }
+.cart-line[data-product-id="5"] .cart-product-image { content: url("images/product-5.jpg"); object-fit: cover; }
+*/
+
+/* ----- PRODUCT ID 6 ----- */
+/*
+.product-card[data-id="6"] .product-media {
+  background-image: url("images/product-6.jpg");
+  background-size: cover;
+  background-position: center;
+}
+.product-card[data-id="6"] .product-media .product-image { opacity: 0; }
+#productModalContent[data-product-id="6"] .modal-product-image { content: url("images/product-6.jpg"); object-fit: cover; }
+.cart-line[data-product-id="6"] .cart-product-image { content: url("images/product-6.jpg"); object-fit: cover; }
+*/
+
+/* ----- PRODUCT ID 7 ----- */
+/*
+.product-card[data-id="7"] .product-media {
+  background-image: url("images/product-7.jpg");
+  background-size: cover;
+  background-position: center;
+}
+.product-card[data-id="7"] .product-media .product-image { opacity: 0; }
+#productModalContent[data-product-id="7"] .modal-product-image { content: url("images/product-7.jpg"); object-fit: cover; }
+.cart-line[data-product-id="7"] .cart-product-image { content: url("images/product-7.jpg"); object-fit: cover; }
+*/
+
+/* ----- PRODUCT ID 8 ----- */
+/*
+.product-card[data-id="8"] .product-media {
+  background-image: url("images/product-8.jpg");
+  background-size: cover;
+  background-position: center;
+}
+.product-card[data-id="8"] .product-media .product-image { opacity: 0; }
+#productModalContent[data-product-id="8"] .modal-product-image { content: url("images/product-8.jpg"); object-fit: cover; }
+.cart-line[data-product-id="8"] .cart-product-image { content: url("images/product-8.jpg"); object-fit: cover; }
+*/
+
+/* Add more product IDs as needed by copying a block above. */

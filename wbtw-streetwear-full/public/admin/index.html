@@ -1,7 +1,510 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WBTW Admin</title><link rel="stylesheet" href="/admin/admin.css"></head><body>
-<div class="login-wrap" id="loginView"><form id="loginForm" class="login-card"><div class="brand">WBTW<small>STORE MANAGEMENT</small></div><p class="eyebrow">PRIVATE ADMIN ACCESS</p><h1>WELCOME BACK.</h1><label>USERNAME<input name="username" value="admin" required autocomplete="username"></label><label>PASSWORD<input name="password" type="password" required autocomplete="current-password"></label><button class="primary">SIGN IN ↗</button><p class="error" id="loginError"></p><a href="/" class="back">← BACK TO STOREFRONT</a></form></div>
-<div class="app" id="appView" hidden><aside class="sidebar"><a class="brand" href="/">WBTW<small>ADMIN CONSOLE</small></a><div class="side-label">MANAGE STORE</div><button class="side-link active" data-view="products">▦ &nbsp; Products</button><button class="side-link" data-view="orders">▤ &nbsp; Orders</button><a class="side-link" href="/" target="_blank">↗ &nbsp; View storefront</a><button class="side-link logout" id="logoutBtn">↪ &nbsp; Sign out</button></aside><main class="main"><header class="topbar"><div><span class="eyebrow">WBTW / ADMIN</span><h2 id="pageTitle">Products</h2></div><span class="admin-user" id="adminUser">ADMIN</span></header>
-<section class="view" id="productsView"><div class="toolbar"><div><h3>PRODUCT LISTING</h3><p>Add, edit and update your shirts and hoodies.</p></div><button class="primary" id="addProductBtn">＋ ADD PRODUCT</button></div><div class="stats" id="stats"></div><div class="table-wrap"><table><thead><tr><th>PRODUCT</th><th>CATEGORY</th><th>PRICE</th><th>STOCK</th><th>STATUS</th><th></th></tr></thead><tbody id="productRows"><tr><td colspan="6">Loading...</td></tr></tbody></table></div></section>
-<section class="view" id="ordersView" hidden><div class="toolbar"><div><h3>ORDER MANAGEMENT</h3><p>Review customer order requests and update their status.</p></div><button class="secondary" id="refreshOrders">↻ REFRESH</button></div><div class="table-wrap"><table><thead><tr><th>ORDER</th><th>CUSTOMER</th><th>ITEMS</th><th>TOTAL</th><th>STATUS</th><th>UPDATE</th></tr></thead><tbody id="orderRows"></tbody></table></div></section>
-</main></div>
-<div class="modal" id="productEditor"><form class="editor" id="productForm"><button type="button" class="x" data-dismiss>×</button><p class="eyebrow">CATALOG MANAGEMENT</p><h2 id="editorTitle">ADD PRODUCT</h2><input type="hidden" name="id"><div class="grid"><label>PRODUCT NAME<input name="name" required></label><label>CATEGORY<select name="category"><option>Shirts</option><option>Hoodies</option></select></label><label>PRICE (PHP)<input name="price" type="number" min="0" required></label><label>COMPARE AT PRICE<input name="compare_price" type="number" min="0"></label><label>STOCK QUANTITY<input name="stock" type="number" min="0" value="0"></label><label>SIZES (comma separated)<input name="sizes" value="S,M,L,XL,XXL"></label><label class="wide">COLORS (comma separated)<input name="colors" placeholder="Black, White, Grey"></label><label class="wide">DESCRIPTION<textarea name="description" rows="3"></textarea></label><label class="wide">PRODUCT IMAGE<input name="imageFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif"><small>Upload JPG, PNG, WEBP or GIF up to 5MB.</small></label><label class="wide">OR IMAGE URL<input name="image" type="url" placeholder="https://..."></label><label class="check"><input name="featured" type="checkbox" value="1"> FEATURE ON HOMEPAGE</label><label class="check"><input name="active" type="checkbox" value="1" checked> PUBLISHED / ACTIVE</label></div><p class="error" id="editorError"></p><div class="actions"><button type="button" class="secondary" data-dismiss>CANCEL</button><button class="primary">SAVE PRODUCT ↗</button></div></form></div><script src="/admin/admin.js"></script></body></html>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>WBTW | Admin Console</title>
+
+  <link rel="stylesheet" href="admin.css">
+</head>
+
+<body>
+
+  <!-- =====================================
+       LOGIN VIEW
+  ====================================== -->
+
+  <section id="loginView">
+
+    <div class="login-wrap">
+
+      <div class="login-card">
+
+        <a href="/" class="brand">
+          WBTW
+          <small>WORN BY THE WISE APPAREL</small>
+        </a>
+
+        <p class="eyebrow">PRIVATE ADMIN ACCESS</p>
+
+        <h1>WELCOME BACK.</h1>
+
+        <form id="loginForm">
+
+          <label>
+            USERNAME
+            <input
+              type="text"
+              name="username"
+              value="admin"
+              autocomplete="username"
+              required
+            >
+          </label>
+
+          <label>
+            PASSWORD
+            <input
+              type="password"
+              name="password"
+              autocomplete="current-password"
+              required
+            >
+          </label>
+
+          <p id="loginError" class="error"></p>
+
+          <button type="submit" class="primary">
+            SIGN IN ↗
+          </button>
+
+        </form>
+
+        <a href="/" class="back">
+          ← BACK TO STOREFRONT
+        </a>
+
+      </div>
+
+    </div>
+
+  </section>
+
+
+  <!-- =====================================
+       ADMIN DASHBOARD
+  ====================================== -->
+
+  <section id="appView" class="app" hidden>
+
+    <!-- SIDEBAR -->
+
+    <aside class="sidebar">
+
+      <a href="/" class="brand">
+        WBTW
+        <small>ADMIN CONSOLE</small>
+      </a>
+
+      <p class="side-label">MANAGE STORE</p>
+
+      <button
+        type="button"
+        class="side-link active"
+        data-view="products"
+      >
+        Products
+      </button>
+
+      <button
+        type="button"
+        class="side-link"
+        data-view="orders"
+      >
+        Orders
+      </button>
+
+      <a href="/" class="side-link">
+        View storefront
+      </a>
+
+      <button
+        type="button"
+        id="logoutBtn"
+        class="side-link logout"
+      >
+        Logout
+      </button>
+
+    </aside>
+
+
+    <!-- MAIN CONTENT -->
+
+    <main class="main">
+
+      <!-- TOP HEADER -->
+
+      <header class="topbar">
+
+        <div>
+          <p class="eyebrow">WBTW / ADMIN</p>
+          <h2 id="pageTitle">Products</h2>
+        </div>
+
+        <div id="adminUser" class="admin-user">
+          ADMIN
+        </div>
+
+      </header>
+
+
+      <!-- =================================
+           PRODUCTS VIEW
+      ================================== -->
+
+      <section id="productsView">
+
+        <div class="toolbar">
+
+          <div>
+            <h3>PRODUCT LISTING</h3>
+            <p>Add, edit and update your shirts and hoodies.</p>
+          </div>
+
+          <button
+            type="button"
+            id="addProductBtn"
+            class="primary"
+          >
+            + ADD PRODUCT
+          </button>
+
+        </div>
+
+
+        <!-- PRODUCT STATISTICS -->
+
+        <div id="stats" class="stats">
+
+          <div class="stat">
+            <span>TOTAL PRODUCTS</span>
+            <strong>0</strong>
+          </div>
+
+          <div class="stat">
+            <span>PUBLISHED</span>
+            <strong>0</strong>
+          </div>
+
+          <div class="stat">
+            <span>LOW STOCK (≤5)</span>
+            <strong>0</strong>
+          </div>
+
+        </div>
+
+
+        <!-- PRODUCT TABLE -->
+
+        <div class="table-wrap">
+
+          <table>
+
+            <thead>
+              <tr>
+                <th>PRODUCT</th>
+                <th>CATEGORY</th>
+                <th>PRICE</th>
+                <th>STOCK</th>
+                <th>STATUS</th>
+                <th>ACTIONS</th>
+              </tr>
+            </thead>
+
+            <tbody id="productRows">
+
+              <tr>
+                <td colspan="6">
+                  Loading products...
+                </td>
+              </tr>
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </section>
+
+
+      <!-- =================================
+           ORDERS VIEW
+      ================================== -->
+
+      <section id="ordersView" hidden>
+
+        <div class="toolbar">
+
+          <div>
+            <h3>ORDER MANAGEMENT</h3>
+            <p>Manage customer orders and delivery status.</p>
+          </div>
+
+          <button
+            type="button"
+            id="refreshOrders"
+            class="secondary"
+          >
+            ↻ REFRESH
+          </button>
+
+        </div>
+
+
+        <div class="table-wrap">
+
+          <table>
+
+            <thead>
+              <tr>
+                <th>ORDER</th>
+                <th>CUSTOMER</th>
+                <th>ITEMS</th>
+                <th>TOTAL</th>
+                <th>STATUS</th>
+                <th>UPDATE</th>
+              </tr>
+            </thead>
+
+            <tbody id="orderRows">
+
+              <tr>
+                <td colspan="6">
+                  No orders yet.
+                </td>
+              </tr>
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </section>
+
+    </main>
+
+  </section>
+
+
+  <!-- =====================================
+       PRODUCT EDITOR MODAL
+  ====================================== -->
+
+  <div id="productEditor" class="modal">
+
+    <div class="editor">
+
+      <button
+        type="button"
+        class="x"
+        data-dismiss
+        aria-label="Close"
+      >
+        ×
+      </button>
+
+      <p class="eyebrow">WBTW / INVENTORY</p>
+
+      <h2 id="editorTitle">ADD PRODUCT</h2>
+
+
+      <!-- PRODUCT FORM -->
+
+      <form id="productForm">
+
+        <input
+          type="hidden"
+          name="id"
+        >
+
+        <div class="grid">
+
+          <!-- PRODUCT NAME -->
+
+          <label>
+            PRODUCT NAME
+
+            <input
+              type="text"
+              name="name"
+              placeholder="WBTW BOLD"
+              required
+            >
+          </label>
+
+
+          <!-- CATEGORY -->
+
+          <label>
+            CATEGORY
+
+            <select name="category" required>
+              <option value="">Select category</option>
+              <option value="T-Shirts">T-Shirts</option>
+              <option value="Hoodies">Hoodies</option>
+              <option value="Pants">Pants</option>
+              <option value="Accessories">Accessories</option>
+            </select>
+          </label>
+
+
+          <!-- PRICE -->
+
+          <label>
+            PRICE (₱)
+
+            <input
+              type="number"
+              name="price"
+              min="0"
+              step="0.01"
+              required
+            >
+          </label>
+
+
+          <!-- COMPARE PRICE -->
+
+          <label>
+            COMPARE PRICE (₱)
+
+            <input
+              type="number"
+              name="compare_price"
+              min="0"
+              step="0.01"
+            >
+          </label>
+
+
+          <!-- STOCK -->
+
+          <label>
+            STOCK
+
+            <input
+              type="number"
+              name="stock"
+              min="0"
+              required
+            >
+          </label>
+
+
+          <!-- SIZES -->
+
+          <label>
+            SIZES
+
+            <input
+              type="text"
+              name="sizes"
+              placeholder="S, M, L, XL, 2XL"
+            >
+
+            <small>Separate sizes with commas.</small>
+          </label>
+
+
+          <!-- COLORS -->
+
+          <label>
+            COLORS
+
+            <input
+              type="text"
+              name="colors"
+              placeholder="Black, White"
+            >
+
+            <small>Separate colors with commas.</small>
+          </label>
+
+
+          <!-- IMAGE -->
+
+          <label class="wide">
+            PRODUCT IMAGE URL
+
+            <input
+              type="text"
+              name="image"
+              placeholder="/uploads/product-image.jpg"
+            >
+          </label>
+
+
+          <!-- DESCRIPTION -->
+
+          <label class="wide">
+            DESCRIPTION
+
+            <textarea
+              name="description"
+              rows="5"
+              placeholder="Product description..."
+            ></textarea>
+          </label>
+
+
+          <!-- FEATURED -->
+
+          <label class="check">
+            <input
+              type="checkbox"
+              name="featured"
+            >
+
+            FEATURED PRODUCT
+          </label>
+
+
+          <!-- ACTIVE -->
+
+          <label class="check">
+            <input
+              type="checkbox"
+              name="active"
+              checked
+            >
+
+            PUBLISHED
+          </label>
+
+        </div>
+
+
+        <p id="editorError" class="error"></p>
+
+
+        <!-- FORM ACTIONS -->
+
+        <div class="actions">
+
+          <button
+            type="button"
+            class="secondary"
+            data-dismiss
+          >
+            CANCEL
+          </button>
+
+          <button
+            type="submit"
+            class="primary"
+          >
+            SAVE PRODUCT
+          </button>
+
+        </div>
+
+      </form>
+
+    </div>
+
+  </div>
+
+
+  <!-- =====================================
+       ADMIN JAVASCRIPT
+  ====================================== -->
+
+  <script src="admin.js"></script>
+
+</body>
+</html>
