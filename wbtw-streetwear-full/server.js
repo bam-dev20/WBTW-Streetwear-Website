@@ -17,7 +17,12 @@ app.set("trust proxy", 1);
 
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
+
+fs.mkdirSync(path.join(ROOT, "data"), { recursive: true });
+fs.mkdirSync(path.join(ROOT, "uploads"), { recursive: true });
+
 const db = new Database(path.join(ROOT, "data", "wbtw.sqlite"));
+db.pragma("journal_mode = WAL");
 db.pragma("journal_mode = WAL");
 
 db.exec(`
