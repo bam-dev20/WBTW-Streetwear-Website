@@ -1,220 +1,676 @@
-const $ = s => document.querySelector(s);
-let currentProducts = [];
 
-// 1. FIXED: Added default credentials so session cookies are saved and sent
+/* =========================================
+   WBTW ADMIN DASHBOARD
+   admin.js
+========================================= */
+
+const $ = selector => document.querySelector(selector);
+
+let currentProducts = [];
+let currentOrders = [];
+
+/* =========================================
+   API HELPER
+========================================= */
+
 async function api(url, options = {}) {
-  const defaultOptions = { credentials: "same-origin" }; // Change to "include" if API is on a different domain
-  const finalOptions = { ...defaultOptions, ...options };
-  
-  const r = await fetch(url, finalOptions);
-  let d = {};
-  
+  const response = await fetch(url, {
+    credentials: "same-origin",
+    ...options
+  });
+
+  let data = {};
+
   try {
-    d = await r.json();
-  } catch {}
-  
-  if (!r.ok) throw new Error(d.error || "Request failed");
-  return d;
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      data.error || `Request failed (${response.status})`
+    );
+  }
+
+  return data;
 }
 
+/* =========================================
+   HELPERS
+========================================= */
+
+// Escape HTML
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+// Convert database values to boolean safely
+function isTrue(value) {
+  return (
+    value === true ||
+    value === 1 ||
+    value === "1" ||
+    value === "true"
+  );
+}
+
+// Convert comma-separated values or arrays to arrays
+function toArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return value.split(",").map(item => item.trim()).filter(Boolean);
+  }
+
+  return [];
+}
+
+// Format Philippine peso
+function money(value) {
+  return Number(value || 0).toLocaleString("en-PH", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  });
+}
+
+// Show login screen
+function showLogin() {
+  $("#loginView").hidden = false;
+  $("#appView").hidden = true;
+}
+
+// Show dashboard
+function showDashboard(username = "Admin") {
+  $("#adminUser").textContent = String(username).toUpperCase();
+
+  $("#loginView").hidden = true;
+  $("#appView").hidden = false;
+}
+
+/* =========================================
+   AUTHENTICATION
+========================================= */
+
+// Check session when admin page loads
 async function boot() {
+  showLogin();
+
   try {
     const me = await api("/api/admin/me");
-    if (me.authenticated) {
-      $("#loginView").hidden = true;
-      $("#appView").hidden = false;
-      // 2. FIXED: Safely check if username exists before calling toUpperCase()
-      $("#adminUser").textContent = (me.username || "Admin").toUpperCase();
-      await loadProducts();
-    } else {
-      $("#loginView").hidden = false;
-      $("#appView").hidden = true;
+
+    if (!me.authenticated) {
+      showLogin();
+      return;
     }
-  } catch {
-    $("#loginView").hidden = false;
+
+    showDashboard(me.username || "Admin");
+
+    await loadProducts();
+
+  } catch (error) {
+    console.error("Admin session error:", error);
+    showLogin();
   }
 }
 
-$("#loginForm").onsubmit = async e => {
-  e.preventDefault();
-  $("#loginError").textContent = "";
-  
-  const f = new FormData(e.target);
-  
+// Admin login
+$("#loginForm").onsubmit = async event => {
+  event.preventDefault();
+
+  const form = event.target;
+  const errorBox = $("#loginError");
+  const submitButton = form.querySelector('[type="submit"]');
+
+  errorBox.textContent = "";
+
+  const formData = new FormData(form);
+
+  const username = formData.get("username");
+  const password = formData.get("password");
+
+  if (!username || !password) {
+    errorBox.textContent = "Please enter your username and password.";
+    return;
+  }
+
+  submitButton.disabled = true;
+
   try {
-    const d = await api("/api/admin/login", {
+    const data = await api("/api/admin/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({
-        username: f.get("username"),
-        password: f.get("password")
+        username,
+        password
       })
     });
-    
-    // 3. FIXED: Safe property check prevents TypeError crashes on login success
-    $("#adminUser").textContent = (d.username || f.get("username") || "Admin").toUpperCase();
-    $("#loginView").hidden = true;
-    $("#appView").hidden = false;
-    
+
+    showDashboard(data.username || username);
+
     await loadProducts();
-  } catch (err) {
-    $("#loginError").textContent = err.message;
+
+  } catch (error) {
+    showLogin();
+    errorBox.textContent = error.message;
+
+  } finally {
+    submitButton.disabled = false;
   }
 };
 
+// Admin logout
 $("#logoutBtn").onclick = async () => {
-  await api("/api/admin/logout", { method: "POST" });
-  location.reload();
+  const button = $("#logoutBtn");
+
+  button.disabled = true;
+
+  try {
+    await api("/api/admin/logout", {
+      method: "POST"
+    });
+
+  } catch (error) {
+    console.error("Logout error:", error);
+
+  } finally {
+    showLogin();
+    location.reload();
+  }
 };
 
-async function loadProducts() {
-  currentProducts = await api("/api/admin/products");
-  
+/* =========================================
+   PRODUCT STATISTICS
+========================================= */
+
+function renderStats() {
+  const total = currentProducts.length;
+
+  const published = currentProducts.filter(product =>
+    isTrue(product.active)
+  ).length;
+
+  const lowStock = currentProducts.filter(product =>
+    Number(product.stock || 0) <= 5
+  ).length;
+
   $("#stats").innerHTML = `
-    <div class="stat"><span>TOTAL PRODUCTS</span><strong>${currentProducts.length}</strong></div>
-    <div class="stat"><span>PUBLISHED</span><strong>${currentProducts.filter(p => p.active).length}</strong></div>
-    <div class="stat"><span>LOW STOCK (≤5)</span><strong>${currentProducts.filter(p => p.stock <= 5).length}</strong></div>
+    <div class="stat">
+      <span>TOTAL PRODUCTS</span>
+      <strong>${total}</strong>
+    </div>
+
+    <div class="stat">
+      <span>PUBLISHED</span>
+      <strong>${published}</strong>
+    </div>
+
+    <div class="stat">
+      <span>LOW STOCK (≤5)</span>
+      <strong>${lowStock}</strong>
+    </div>
   `;
-  
-  $("#productRows").innerHTML = currentProducts.map(p => `
+}
+
+/* =========================================
+   LOAD PRODUCTS
+========================================= */
+
+async function loadProducts() {
+  try {
+    const products = await api("/api/admin/products");
+
+    currentProducts = Array.isArray(products)
+      ? products
+      : [];
+
+    renderStats();
+    renderProducts();
+
+  } catch (error) {
+    console.error("Load products error:", error);
+
+    $("#productRows").innerHTML = `
+      <tr>
+        <td colspan="6">
+          ${esc(error.message)}
+        </td>
+      </tr>
+    `;
+  }
+}
+
+/* =========================================
+   RENDER PRODUCTS
+========================================= */
+
+function renderProducts() {
+  $("#productRows").innerHTML = currentProducts.map(product => {
+    const active = isTrue(product.active);
+
+    return `
+      <tr>
+        <td>
+          <div class="item">
+
+            <img
+              src="${esc(product.image || "")}"
+              alt="${esc(product.name)}"
+              onerror="this.style.display='none'"
+            >
+
+            <div>
+              <strong>${esc(product.name)}</strong>
+              <small>ID #${esc(product.id)}</small>
+            </div>
+
+          </div>
+        </td>
+
+        <td>${esc(product.category)}</td>
+
+        <td>₱${money(product.price)}</td>
+
+        <td>${Number(product.stock || 0)}</td>
+
+        <td>
+          <span class="status">
+            ${active ? "PUBLISHED" : "DRAFT"}
+          </span>
+        </td>
+
+        <td>
+          <div class="row-actions">
+
+            <button
+              type="button"
+              data-edit-product="${esc(product.id)}"
+            >
+              Edit
+            </button>
+
+            <button
+              type="button"
+              data-delete-product="${esc(product.id)}"
+            >
+              Delete
+            </button>
+
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("") || `
     <tr>
-      <td>
-        <div class="item">
-          <img src="${p.image}" alt="">
-          <div><strong>${esc(p.name)}</strong><small>ID #${p.id}</small></div>
-        </div>
-      </td>
-      <td>${esc(p.category)}</td>
-      <td>₱${Number(p.price).toLocaleString("en-PH")}</td>
-      <td>${p.stock}</td>
-      <td><span class="status">${p.active ? "PUBLISHED" : "DRAFT"}</span></td>
-      <td>
-        <div class="row-actions">
-          <button onclick="editProduct(${p.id})">Edit</button>
-          <button onclick="deleteProduct(${p.id})">Delete</button>
-        </div>
+      <td colspan="6">
+        No products yet. Add your first product.
       </td>
     </tr>
-  `).join("") || '<tr><td colspan="6">No products. Add your first product.</td></tr>';
+  `;
 }
 
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, c => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  }[c]));
-}
+/* =========================================
+   PRODUCT EDITOR
+========================================= */
 
 function openEditor() {
-  $("#productForm").reset();
-  $("#productForm").elements.id.value = "";
+  const form = $("#productForm");
+
+  form.reset();
+
+  form.elements.id.value = "";
+
   $("#editorTitle").textContent = "ADD PRODUCT";
   $("#editorError").textContent = "";
+
   $("#productEditor").classList.add("open");
 }
 
-window.editProduct = id => {
-  const p = currentProducts.find(x => x.id === id);
-  if (!p) return;
-  
-  openEditor();
-  $("#editorTitle").textContent = "EDIT PRODUCT";
-  
-  const f = $("#productForm");
-  for (const k of ["name", "category", "price", "compare_price", "stock", "description", "image"]) {
-    f.elements[k].value = p[k] ?? "";
-  }
-  
-  f.elements.id.value = p.id;
-  f.elements.sizes.value = (p.sizes || []).join(",");
-  f.elements.colors.value = (p.colors || []).join(",");
-  f.elements.featured.checked = !!p.featured;
-  f.elements.active.checked = !!p.active;
-};
-
-window.deleteProduct = async id => {
-  if (!confirm("Permanently delete this product?")) return;
-  try {
-    await api("/api/admin/products/" + id, { method: "DELETE" });
-    await loadProducts();
-  } catch (e) {
-    alert(e.message);
-  }
-};
-
+// Add product
 $("#addProductBtn").onclick = openEditor;
 
-document.querySelectorAll("[data-dismiss]").forEach(b => {
-  b.onclick = () => $("#productEditor").classList.remove("open");
+// Edit product
+window.editProduct = id => {
+  const product = currentProducts.find(item =>
+    String(item.id) === String(id)
+  );
+
+  if (!product) {
+    alert("Product not found.");
+    return;
+  }
+
+  openEditor();
+
+  $("#editorTitle").textContent = "EDIT PRODUCT";
+
+  const form = $("#productForm");
+
+  const fields = [
+    "name",
+    "category",
+    "price",
+    "compare_price",
+    "stock",
+    "description",
+    "image"
+  ];
+
+  fields.forEach(key => {
+    if (form.elements[key]) {
+      form.elements[key].value = product[key] ?? "";
+    }
+  });
+
+  form.elements.id.value = product.id;
+
+  form.elements.sizes.value = toArray(product.sizes).join(",");
+  form.elements.colors.value = toArray(product.colors).join(",");
+
+  form.elements.featured.checked = isTrue(product.featured);
+  form.elements.active.checked = isTrue(product.active);
+};
+
+// Close editor
+document.querySelectorAll("[data-dismiss]").forEach(button => {
+  button.onclick = () => {
+    $("#productEditor").classList.remove("open");
+  };
 });
 
-$("#productForm").onsubmit = async e => {
-  e.preventDefault();
-  $("#editorError").textContent = "";
-  
-  const f = e.target;
-  const fd = new FormData(f);
-  fd.set("featured", f.elements.featured.checked ? "1" : "0");
-  fd.set("active", f.elements.active.checked ? "1" : "0");
-  
-  const id = f.elements.id.value;
+/* =========================================
+   PRODUCT TABLE ACTIONS
+========================================= */
+
+// Handle Edit and Delete buttons safely
+$("#productRows").addEventListener("click", event => {
+  const editButton = event.target.closest("[data-edit-product]");
+  const deleteButton = event.target.closest("[data-delete-product]");
+
+  if (editButton) {
+    editProduct(editButton.dataset.editProduct);
+  }
+
+  if (deleteButton) {
+    deleteProduct(deleteButton.dataset.deleteProduct);
+  }
+});
+
+/* =========================================
+   DELETE PRODUCT
+========================================= */
+
+window.deleteProduct = async id => {
+  const confirmed = confirm(
+    "Permanently delete this product?"
+  );
+
+  if (!confirmed) return;
+
   try {
-    await api(id ? "/api/admin/products/" + id : "/api/admin/products", {
-      method: id ? "PUT" : "POST",
-      body: fd // Note: do not set Content-Type manually when sending FormData
-    });
-    $("#productEditor").classList.remove("open");
+    await api(
+      "/api/admin/products/" + encodeURIComponent(id),
+      {
+        method: "DELETE"
+      }
+    );
+
     await loadProducts();
-  } catch (err) {
-    $("#editorError").textContent = err.message;
+
+  } catch (error) {
+    alert(error.message);
   }
 };
 
-document.querySelectorAll("[data-view]").forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll("[data-view]").forEach(x => x.classList.toggle("active", x === b));
-    $("#productsView").hidden = b.dataset.view !== "products";
-    $("#ordersView").hidden = b.dataset.view !== "orders";
-    $("#pageTitle").textContent = b.dataset.view === "products" ? "Products" : "Orders";
-    if (b.dataset.view === "orders") loadOrders();
+/* =========================================
+   SAVE PRODUCT
+========================================= */
+
+$("#productForm").onsubmit = async event => {
+  event.preventDefault();
+
+  const form = event.target;
+  const errorBox = $("#editorError");
+  const submitButton = form.querySelector('[type="submit"]');
+
+  errorBox.textContent = "";
+
+  const formData = new FormData(form);
+
+  // Explicit checkbox values
+  formData.set(
+    "featured",
+    form.elements.featured.checked ? "1" : "0"
+  );
+
+  formData.set(
+    "active",
+    form.elements.active.checked ? "1" : "0"
+  );
+
+  const id = form.elements.id.value;
+
+  const url = id
+    ? "/api/admin/products/" + encodeURIComponent(id)
+    : "/api/admin/products";
+
+  submitButton.disabled = true;
+
+  try {
+    await api(url, {
+      method: id ? "PUT" : "POST",
+      body: formData
+    });
+
+    $("#productEditor").classList.remove("open");
+
+    await loadProducts();
+
+  } catch (error) {
+    errorBox.textContent = error.message;
+
+  } finally {
+    submitButton.disabled = false;
+  }
+};
+
+/* =========================================
+   NAVIGATION
+========================================= */
+
+document.querySelectorAll("[data-view]").forEach(button => {
+  button.onclick = () => {
+    const view = button.dataset.view;
+
+    document.querySelectorAll("[data-view]").forEach(item => {
+      item.classList.toggle("active", item === button);
+    });
+
+    $("#productsView").hidden = view !== "products";
+    $("#ordersView").hidden = view !== "orders";
+
+    $("#pageTitle").textContent =
+      view === "products" ? "Products" : "Orders";
+
+    if (view === "orders") {
+      loadOrders();
+    }
   };
 });
+
+/* =========================================
+   LOAD ORDERS
+========================================= */
 
 async function loadOrders() {
   try {
     const orders = await api("/api/admin/orders");
-    $("#orderRows").innerHTML = orders.map(o => `
+
+    currentOrders = Array.isArray(orders)
+      ? orders
+      : [];
+
+    renderOrders();
+
+  } catch (error) {
+    console.error("Load orders error:", error);
+
+    $("#orderRows").innerHTML = `
       <tr>
-        <td>#${o.id}<br><small>${esc(o.created_at)}</small></td>
-        <td>${esc(o.customer_name)}<br>${esc(o.phone)}<br><small>${esc(o.address)}</small></td>
-        <td>${(o.items || []).map(i => `${esc(i.name)} × ${i.qty} (${esc(i.size)})`).join("<br>")}</td>
-        <td>₱${Number(o.total).toLocaleString("en-PH")}</td>
-        <td><span class="status">${esc(o.status)}</span></td>
-        <td>
-          <select onchange="updateOrder(${o.id}, this.value)">
-            ${["Pending", "Confirmed", "Processing", "Shipped", "Completed", "Cancelled"].map(s => 
-              `<option ${s === o.status ? "selected" : ""}>${s}</option>`
-            ).join("")}
-          </select>
+        <td colspan="6">
+          ${esc(error.message)}
         </td>
       </tr>
-    `).join("") || '<tr><td colspan="6">No orders yet.</td></tr>';
-  } catch (e) {
-    $("#orderRows").innerHTML = `<tr><td colspan="6">${esc(e.message)}</td></tr>`;
+    `;
   }
 }
 
-window.updateOrder = async (id, status) => {
+/* =========================================
+   RENDER ORDERS
+========================================= */
+
+function renderOrders() {
+  const statuses = [
+    "Pending",
+    "Confirmed",
+    "Processing",
+    "Shipped",
+    "Completed",
+    "Cancelled"
+  ];
+
+  $("#orderRows").innerHTML = currentOrders.map(order => {
+    const currentStatus = order.status || "Pending";
+
+    const options = [...new Set([
+      ...statuses,
+      currentStatus
+    ])];
+
+    return `
+      <tr>
+        <td>
+          #${esc(order.id)}
+          <br>
+          <small>${esc(order.created_at)}</small>
+        </td>
+
+        <td>
+          ${esc(order.customer_name)}
+          <br>
+          ${esc(order.phone)}
+          <br>
+          <small>${esc(order.address)}</small>
+        </td>
+
+        <td>
+          ${(order.items || []).map(item => `
+            ${esc(item.name)}
+            × ${esc(item.qty)}
+            (${esc(item.size)})
+          `).join("<br>")}
+        </td>
+
+        <td>
+          ₱${money(order.total)}
+        </td>
+
+        <td>
+          <span class="status">
+            ${esc(currentStatus)}
+          </span>
+        </td>
+
+        <td>
+          <select
+            data-order-id="${esc(order.id)}"
+            aria-label="Update order status"
+          >
+            ${options.map(status => `
+              <option
+                value="${esc(status)}"
+                ${status === currentStatus ? "selected" : ""}
+              >
+                ${esc(status)}
+              </option>
+            `).join("")}
+          </select>
+        </td>
+      </tr>
+    `;
+  }).join("") || `
+    <tr>
+      <td colspan="6">
+        No orders yet.
+      </td>
+    </tr>
+  `;
+}
+
+/* =========================================
+   UPDATE ORDER STATUS
+========================================= */
+
+$("#orderRows").addEventListener("change", async event => {
+  const select = event.target.closest("[data-order-id]");
+
+  if (!select) return;
+
+  const id = select.dataset.orderId;
+  const status = select.value;
+
+  const previousOrder = currentOrders.find(order =>
+    String(order.id) === String(id)
+  );
+
+  const previousStatus = previousOrder
+    ? previousOrder.status
+    : "Pending";
+
+  select.disabled = true;
+
   try {
-    await api("/api/admin/orders/" + id, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status })
-    });
-  } catch (e) {
-    alert(e.message);
+    await api(
+      "/api/admin/orders/" + encodeURIComponent(id),
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ status })
+      }
+    );
+
+    await loadOrders();
+
+  } catch (error) {
+    alert(error.message);
+
+    select.value = previousStatus;
+
+  } finally {
+    select.disabled = false;
   }
-};
+});
+
+/* =========================================
+   REFRESH ORDERS
+========================================= */
 
 $("#refreshOrders").onclick = loadOrders;
+
+/* =========================================
+   START ADMIN
+========================================= */
 
 boot();
