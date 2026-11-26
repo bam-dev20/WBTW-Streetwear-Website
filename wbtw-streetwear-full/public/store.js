@@ -1,186 +1,122 @@
-﻿
-const $ = (selector) => document.querySelector(selector);
+﻿const $ = (s) => document.querySelector(s);
 
 let products = [];
 let cart = [];
 let activeCategory = "All";
 let searchTerm = "";
+let galleryImages = [];
+let galleryIndex = 0;
 
 const money = (n) =>
-    "₱" + Number(n).toLocaleString("en-PH", {
-        maximumFractionDigits: 0
-    });
+    "₱" + Number(n).toLocaleString("en-PH", { maximumFractionDigits: 0 });
 
-const esc = (value) =>
-    String(value ?? "").replace(/[&<>"']/g, (char) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;"
-    })[char]);
+const esc = (v) =>
+    String(v ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[c]);
 
-const fallbackImage =
-    "https://placehold.co/800x1000/e3e1db/111?text=WBTW";
+const fallbackImage = "https://placehold.co/800x1000/e3e1db/111?text=WBTW";
 
-// Only allow safe image URL schemes.
 function safeImage(url) {
     const value = String(url || "").trim();
-
-    if (
-        value.startsWith("/") &&
-        !value.startsWith("//")
-    ) {
-        return esc(value);
-    }
-
+    if (value.startsWith("/") && !value.startsWith("//")) return esc(value);
     try {
         const parsed = new URL(value, window.location.origin);
-
-        if (["http:", "https:"].includes(parsed.protocol)) {
-            return esc(value);
-        }
-    } catch (error) {
-        // Use fallback below.
-    }
-
+        if (["http:", "https:"].includes(parsed.protocol)) return esc(value);
+    } catch (e) { /* fallback below */ }
     return fallbackImage;
 }
 
-// --------------------------------------------------
-// PRODUCT LOADING
-// --------------------------------------------------
+// Turns whatever the API sends (array, JSON string, comma list) into a clean array.
+function toList(value) {
+    if (Array.isArray(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+        try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) return parsed;
+        } catch (e) { /* not JSON */ }
+        return value.split(",");
+    }
+    return [];
+}
+
+// All images for a product: main image first, no duplicates, max 8.
+function productImages(product) {
+    const extra = [
+        ...toList(product.images),
+        ...toList(product.gallery),
+        ...toList(product.image_urls),
+        ...toList(product.photos)
+    ];
+    const all = [product.image, ...extra]
+        .map((s) => (s && typeof s === "object" ? s.url || s.src : s))
+        .map((s) => String(s || "").trim())
+        .filter(Boolean);
+    return [...new Set(all)].slice(0, 8);
+}
+
+// ---------- PRODUCT LOADING ----------
 
 async function loadProducts() {
     try {
-        const response = await fetch("/api/products");
-
-        if (!response.ok) {
-            throw new Error("Unable to load products.");
-        }
-
+        const response = await fetch("/api/products", { cache: "no-store" });
+        if (!response.ok) throw new Error("Unable to load products.");
         products = await response.json();
-
         renderProducts();
-
     } catch (error) {
         console.error("Product loading error:", error);
-
         $("#productGrid").innerHTML =
             '<p class="no-products">STORE CONNECTION UNAVAILABLE. PLEASE REFRESH.</p>';
     }
 }
 
-// --------------------------------------------------
-// PRODUCT FILTERING AND SORTING
-// --------------------------------------------------
-
 function filteredProducts() {
-    let list = products.filter((product) => {
-        const matchesCategory =
-            activeCategory === "All" ||
-            product.category === activeCategory;
-
-        const searchableText =
-            `${product.name} ${product.category} ${product.description}`
-                .toLowerCase();
-
-        return matchesCategory &&
-            searchableText.includes(searchTerm);
+    const list = products.filter((p) => {
+        const okCat = activeCategory === "All" || p.category === activeCategory;
+        const text = `${p.name} ${p.category} ${p.description}`.toLowerCase();
+        return okCat && text.includes(searchTerm);
     });
-
     const sort = $("#sortSelect").value;
-
-    if (sort === "low") {
-        list.sort((a, b) => a.price - b.price);
-    }
-
-    if (sort === "high") {
-        list.sort((a, b) => b.price - a.price);
-    }
-
-    if (sort === "newest") {
-        list.sort((a, b) => b.id - a.id);
-    }
-
+    if (sort === "low") list.sort((a, b) => a.price - b.price);
+    if (sort === "high") list.sort((a, b) => b.price - a.price);
+    if (sort === "newest") list.sort((a, b) => b.id - a.id);
     return list;
 }
 
-// --------------------------------------------------
-// PRODUCT RENDERING
-// --------------------------------------------------
-
 function renderProducts() {
     const list = filteredProducts();
-
-    $("#allCount").textContent =
-        String(products.length).padStart(2, "0");
+    $("#allCount").textContent = String(products.length).padStart(2, "0");
 
     $("#productGrid").innerHTML = list.length
-        ? list.map((product) => `
-            <article
-                class="product-card reveal visible"
-                data-id="${esc(product.id)}"
-            >
-                <div
-                    class="product-media"
-                    data-action="open-product"
-                    data-id="${esc(product.id)}"
-                    role="button"
-                    tabindex="0"
-                >
-                    ${
-                        product.featured
-                            ? '<span class="product-label">WBTW FEATURED</span>'
-                            : ""
-                    }
-
-                    <img
-                        class="product-image"
-                        src="${safeImage(product.image)}"
-                        alt="${esc(product.name)}"
-                        loading="lazy"
-                    >
-
-                    <button
-                        type="button"
-                        class="quick-add"
-                        data-action="open-product"
-                        data-id="${esc(product.id)}"
-                    >
-                        QUICK VIEW +
-                    </button>
+        ? list.map((p) => {
+            const imgs = productImages(p);
+            const count = imgs.length > 1
+                ? `<span class="photo-count">${imgs.length} PHOTOS</span>` : "";
+            return `
+            <article class="product-card reveal visible" data-id="${esc(p.id)}">
+                <div class="product-media" data-action="open-product"
+                     data-id="${esc(p.id)}" role="button" tabindex="0">
+                    ${p.featured ? '<span class="product-label">WBTW FEATURED</span>' : ""}
+                    ${count}
+                    <img class="product-image" src="${safeImage(imgs[0])}"
+                         alt="${esc(p.name)}" loading="lazy">
+                    <button type="button" class="quick-add" data-action="open-product"
+                            data-id="${esc(p.id)}">QUICK VIEW +</button>
                 </div>
-
-                <div
-                    class="product-details"
-                    data-action="open-product"
-                    data-id="${esc(product.id)}"
-                    role="button"
-                    tabindex="0"
-                >
+                <div class="product-details" data-action="open-product"
+                     data-id="${esc(p.id)}" role="button" tabindex="0">
                     <div>
-                        <div class="product-title">
-                            ${esc(product.name)}
-                        </div>
-
-                        <div class="product-category">
-                            ${esc(product.category)}
-                        </div>
+                        <div class="product-title">${esc(p.name)}</div>
+                        <div class="product-category">${esc(p.category)}</div>
                     </div>
-
-                    <div class="product-price">
-                        ${money(product.price)}
-                    </div>
+                    <div class="product-price">${money(p.price)}</div>
                 </div>
-            </article>
-        `).join("")
+            </article>`;
+        }).join("")
         : '<p class="no-products">NO PIECES FOUND. CHECK BACK FOR THE NEXT DROP.</p>';
 }
 
-// --------------------------------------------------
-// CART DRAWER
-// --------------------------------------------------
+// ---------- CART ----------
 
 function showCart() {
     $("#cartDrawer").classList.add("open");
@@ -196,41 +132,23 @@ function hideCart() {
 
 function addCart(product, size) {
     if (!product) return;
-
-    const found = cart.find(
-        (item) => item.id === product.id && item.size === size
-    );
-
+    const found = cart.find((i) => i.id === product.id && i.size === size);
     if (found) {
         found.qty++;
     } else {
         cart.push({
-            id: product.id,
-            name: product.name,
-            price: product.price,
-            image: product.image,
-            size,
-            qty: 1
+            id: product.id, name: product.name, price: product.price,
+            image: productImages(product)[0], size, qty: 1
         });
     }
-
     renderCart();
-
     $("#productModal").classList.remove("open");
-
     showCart();
 }
 
 function renderCart() {
-    const qty = cart.reduce(
-        (sum, item) => sum + item.qty,
-        0
-    );
-
-    const total = cart.reduce(
-        (sum, item) => sum + item.price * item.qty,
-        0
-    );
+    const qty = cart.reduce((s, i) => s + i.qty, 0);
+    const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
     $("#bagCount").textContent = qty;
     $("#drawerCount").textContent = `(${qty})`;
@@ -238,498 +156,323 @@ function renderCart() {
 
     $("#cartLines").innerHTML = cart.length
         ? cart.map((item, index) => `
-            <div class="cart-line">
-                <img
-                    class="cart-product-image"
-                    src="${safeImage(item.image)}"
-                    alt="${esc(item.name)}"
-                >
-
+            <div class="cart-line" data-product-id="${esc(item.id)}">
+                <img class="cart-product-image" src="${safeImage(item.image)}"
+                     alt="${esc(item.name)}">
                 <div>
                     ${esc(item.name)}
-
                     <div>${esc(item.size)}</div>
-
                     <strong>${money(item.price)}</strong>
-
                     <div class="qty-controls">
-                        <button
-                            type="button"
-                            data-action="change-qty"
-                            data-index="${index}"
-                            data-change="-1"
-                            aria-label="Decrease quantity"
-                        >
-                            −
-                        </button>
-
+                        <button type="button" data-action="change-qty"
+                                data-index="${index}" data-change="-1"
+                                aria-label="Decrease quantity">−</button>
                         ${item.qty}
-
-                        <button
-                            type="button"
-                            data-action="change-qty"
-                            data-index="${index}"
-                            data-change="1"
-                            aria-label="Increase quantity"
-                        >
-                            +
-                        </button>
+                        <button type="button" data-action="change-qty"
+                                data-index="${index}" data-change="1"
+                                aria-label="Increase quantity">+</button>
                     </div>
                 </div>
-
-                <button
-                    type="button"
-                    data-action="remove-cart"
-                    data-index="${index}"
-                >
-                    REMOVE
-                </button>
-            </div>
-        `).join("")
+                <button type="button" data-action="remove-cart"
+                        data-index="${index}">REMOVE</button>
+            </div>`).join("")
         : '<p class="empty-cart">YOUR BAG IS EMPTY.</p>';
 }
 
 function changeQty(index, amount) {
     const item = cart[index];
-
     if (!item) return;
-
     item.qty += amount;
-
-    if (item.qty < 1) {
-        cart.splice(index, 1);
-    }
-
+    if (item.qty < 1) cart.splice(index, 1);
     renderCart();
 }
 
 function removeCart(index) {
     if (!cart[index]) return;
-
     cart.splice(index, 1);
-
     renderCart();
 }
 
-// --------------------------------------------------
-// PRODUCT MODAL
-// --------------------------------------------------
+// ---------- PRODUCT MODAL + GALLERY ----------
+
+function setGalleryImage(index) {
+    if (!galleryImages.length) return;
+    galleryIndex = (index + galleryImages.length) % galleryImages.length;
+
+    const main = $("#modalMainImage");
+    if (main) {
+        delete main.dataset.fallbackApplied;
+        main.src = safeImage(galleryImages[galleryIndex]);
+    }
+
+    const counter = $("#galleryCounter");
+    if (counter) counter.textContent = `${galleryIndex + 1} / ${galleryImages.length}`;
+
+    document.querySelectorAll("#productModalContent .modal-thumb").forEach((btn, i) => {
+        btn.classList.toggle("active", i === galleryIndex);
+    });
+}
 
 function openProduct(id) {
-    const product = products.find(
-        (item) => String(item.id) === String(id)
-    );
-
+    const product = products.find((p) => String(p.id) === String(id));
     if (!product) return;
 
-    const modalContent = $("#productModalContent");
+    const content = $("#productModalContent");
+    content.dataset.productId = product.id;
 
-    modalContent.dataset.productId = product.id;
+    galleryImages = productImages(product);
+    galleryIndex = 0;
+    const multi = galleryImages.length > 1;
 
-    modalContent.innerHTML = `
-        <img
-            class="modal-product-image"
-            src="${safeImage(product.image)}"
-            alt="${esc(product.name)}"
-        >
+    const arrows = multi ? `
+        <button type="button" class="gallery-arrow prev" data-action="gallery-prev"
+                aria-label="Previous image">‹</button>
+        <button type="button" class="gallery-arrow next" data-action="gallery-next"
+                aria-label="Next image">›</button>
+        <span class="gallery-counter" id="galleryCounter">1 / ${galleryImages.length}</span>` : "";
+
+    const thumbs = multi ? `
+        <div class="modal-thumbs">
+            ${galleryImages.map((img, i) => `
+                <button type="button" class="modal-thumb${i === 0 ? " active" : ""}"
+                        data-action="show-image" data-index="${i}"
+                        aria-label="Show image ${i + 1}">
+                    <img src="${safeImage(img)}" alt="${esc(product.name)} view ${i + 1}"
+                         loading="lazy">
+                </button>`).join("")}
+        </div>` : "";
+
+    content.innerHTML = `
+        <div class="modal-gallery">
+            <div class="modal-main">
+                <img id="modalMainImage" class="modal-product-image"
+                     src="${safeImage(galleryImages[0])}" alt="${esc(product.name)}">
+                ${arrows}
+            </div>
+            ${thumbs}
+        </div>
 
         <div class="product-modal-info">
-
-            <p class="kicker">
-                ${esc(product.category)} / WBTW®
-            </p>
-
+            <p class="kicker">${esc(product.category)} / WBTW®</p>
             <h3>${esc(product.name)}</h3>
-
-            <div class="modal-price">
-                ${money(product.price)}
-            </div>
-
+            <div class="modal-price">${money(product.price)}</div>
             <p>${esc(product.description)}</p>
-
             <label>
                 SELECT SIZE
-
                 <select id="modalSize">
                     ${(product.sizes || ["S", "M", "L", "XL"])
-                        .map((size) => `
-                            <option value="${esc(size)}">
-                                ${esc(size)}
-                            </option>
-                        `).join("")}
+                        .map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}
                 </select>
             </label>
-
-            <p>
-                ${
-                    product.stock > 0
-                        ? `${product.stock} PIECES AVAILABLE`
-                        : "SOLD OUT"
-                }
-            </p>
-
-            <button
-                type="button"
-                class="pill-button"
-                data-action="add-to-cart"
-                ${product.stock <= 0 ? "disabled" : ""}
-            >
-                ADD TO BAG ↗
-            </button>
-
-        </div>
-    `;
+            <p>${product.stock > 0 ? `${product.stock} PIECES AVAILABLE` : "SOLD OUT"}</p>
+            <button type="button" class="pill-button" data-action="add-to-cart"
+                    ${product.stock <= 0 ? "disabled" : ""}>ADD TO BAG ↗</button>
+        </div>`;
 
     $("#productModal").classList.add("open");
 }
 
-// --------------------------------------------------
-// MOBILE MENU
-// --------------------------------------------------
+// ---------- MOBILE MENU ----------
 
 const mobileMenu = $("#mobileMenu");
 const siteHeader = $("#header");
 
 function positionMobileMenu() {
     if (mobileMenu && siteHeader) {
-        mobileMenu.style.top =
-            `${siteHeader.getBoundingClientRect().bottom}px`;
+        mobileMenu.style.top = `${siteHeader.getBoundingClientRect().bottom}px`;
     }
 }
 
-// --------------------------------------------------
-// PRODUCT IMAGE FALLBACK
-// --------------------------------------------------
+// ---------- IMAGE FALLBACK ----------
 
-// Error events do not bubble normally, so use capture.
 function handleImageError(event) {
-    const image = event.target;
-
-    if (
-        image instanceof HTMLImageElement &&
-        !image.dataset.fallbackApplied
-    ) {
-        image.dataset.fallbackApplied = "true";
-        image.src = fallbackImage;
+    const img = event.target;
+    if (img instanceof HTMLImageElement && !img.dataset.fallbackApplied) {
+        img.dataset.fallbackApplied = "true";
+        img.src = fallbackImage;
     }
 }
 
-$("#productGrid").addEventListener(
-    "error",
-    handleImageError,
-    true
-);
+["#productGrid", "#cartLines", "#productModalContent"].forEach((sel) =>
+    $(sel).addEventListener("error", handleImageError, true));
 
-$("#cartLines").addEventListener(
-    "error",
-    handleImageError,
-    true
-);
+// ---------- EVENTS: GRID ----------
 
-$("#productModalContent").addEventListener(
-    "error",
-    handleImageError,
-    true
-);
-
-// --------------------------------------------------
-// EVENT LISTENERS: PRODUCT GRID
-// --------------------------------------------------
-
-$("#productGrid").addEventListener("click", (event) => {
-    const target = event.target.closest('[data-action="open-product"]');
-
-    if (!target) return;
-
-    openProduct(target.dataset.id);
+$("#productGrid").addEventListener("click", (e) => {
+    const t = e.target.closest('[data-action="open-product"]');
+    if (t) openProduct(t.dataset.id);
 });
 
-$("#productGrid").addEventListener("keydown", (event) => {
-    if (
-        event.key !== "Enter" &&
-        event.key !== " "
-    ) return;
-
-    const target = event.target.closest(
-        '[data-action="open-product"]'
-    );
-
-    if (!target || target.tagName === "BUTTON") return;
-
-    event.preventDefault();
-
-    openProduct(target.dataset.id);
+$("#productGrid").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const t = e.target.closest('[data-action="open-product"]');
+    if (!t || t.tagName === "BUTTON") return;
+    e.preventDefault();
+    openProduct(t.dataset.id);
 });
 
-// --------------------------------------------------
-// EVENT LISTENERS: CART
-// --------------------------------------------------
+// ---------- EVENTS: CART ----------
 
-$("#cartLines").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-action]");
-
-    if (!button) return;
-
-    const index = Number(button.dataset.index);
-
-    if (button.dataset.action === "change-qty") {
-        changeQty(index, Number(button.dataset.change));
-    }
-
-    if (button.dataset.action === "remove-cart") {
-        removeCart(index);
-    }
+$("#cartLines").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    const index = Number(btn.dataset.index);
+    if (btn.dataset.action === "change-qty") changeQty(index, Number(btn.dataset.change));
+    if (btn.dataset.action === "remove-cart") removeCart(index);
 });
 
-// --------------------------------------------------
-// EVENT LISTENERS: PRODUCT MODAL
-// --------------------------------------------------
+// ---------- EVENTS: MODAL ----------
 
-$("#productModalContent").addEventListener("click", (event) => {
-    const button = event.target.closest(
-        '[data-action="add-to-cart"]'
-    );
+$("#productModalContent").addEventListener("click", (e) => {
+    const thumb = e.target.closest('[data-action="show-image"]');
+    if (thumb) return setGalleryImage(Number(thumb.dataset.index));
 
-    if (!button || button.disabled) return;
+    if (e.target.closest('[data-action="gallery-prev"]')) return setGalleryImage(galleryIndex - 1);
+    if (e.target.closest('[data-action="gallery-next"]')) return setGalleryImage(galleryIndex + 1);
 
-    const productId = $("#productModalContent").dataset.productId;
+    const btn = e.target.closest('[data-action="add-to-cart"]');
+    if (!btn || btn.disabled) return;
 
-    const product = products.find(
-        (item) => String(item.id) === String(productId)
-    );
-
-    const size = $("#modalSize").value;
-
-    addCart(product, size);
+    const id = $("#productModalContent").dataset.productId;
+    const product = products.find((p) => String(p.id) === String(id));
+    addCart(product, $("#modalSize").value);
 });
 
-// --------------------------------------------------
-// HEADER AND NAVIGATION
-// --------------------------------------------------
+// Arrow keys + Escape while the product modal is open
+document.addEventListener("keydown", (e) => {
+    if (!$("#productModal").classList.contains("open")) return;
+    if (e.key === "ArrowLeft") setGalleryImage(galleryIndex - 1);
+    if (e.key === "ArrowRight") setGalleryImage(galleryIndex + 1);
+    if (e.key === "Escape") $("#productModal").classList.remove("open");
+});
+
+// Swipe on the main image (mobile)
+let touchX = null;
+$("#productModalContent").addEventListener("touchstart", (e) => {
+    touchX = e.target.closest(".modal-main") ? e.touches[0].clientX : null;
+}, { passive: true });
+$("#productModalContent").addEventListener("touchend", (e) => {
+    if (touchX === null) return;
+    const dx = e.changedTouches[0].clientX - touchX;
+    if (Math.abs(dx) > 40) setGalleryImage(galleryIndex + (dx < 0 ? 1 : -1));
+    touchX = null;
+}, { passive: true });
+
+// ---------- HEADER / NAV ----------
 
 $("#bagToggle").addEventListener("click", showCart);
 $("#cartClose").addEventListener("click", hideCart);
 $("#scrim").addEventListener("click", hideCart);
 
-document.querySelectorAll("[data-close]").forEach((button) => {
-    button.addEventListener("click", () => {
-        const modal = $("#" + button.dataset.close);
+document.querySelectorAll("[data-close]").forEach((b) =>
+    b.addEventListener("click", () => $("#" + b.dataset.close)?.classList.remove("open")));
 
-        if (modal) modal.classList.remove("open");
-    });
-});
+document.querySelectorAll(".modal").forEach((m) =>
+    m.addEventListener("click", (e) => {
+        if (e.target === m) m.classList.remove("open");
+    }));
 
-document.querySelectorAll(".modal").forEach((modal) => {
-    modal.addEventListener("click", (event) => {
-        if (event.target === modal) {
-            modal.classList.remove("open");
-        }
-    });
-});
-
-// --------------------------------------------------
-// CATEGORY FILTERS
-// --------------------------------------------------
-
-document.querySelectorAll("[data-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-        activeCategory = button.dataset.filter;
-
-        document.querySelectorAll(".filter").forEach((item) => {
-            item.classList.toggle(
-                "active",
-                item === button
-            );
-        });
-
+document.querySelectorAll("[data-filter]").forEach((b) =>
+    b.addEventListener("click", () => {
+        activeCategory = b.dataset.filter;
+        document.querySelectorAll(".filter").forEach((f) => f.classList.toggle("active", f === b));
         renderProducts();
-    });
-});
+    }));
 
-document.querySelectorAll("[data-cat]").forEach((link) => {
+document.querySelectorAll("[data-cat]").forEach((link) =>
     link.addEventListener("click", () => {
         activeCategory = link.dataset.cat;
-
-        document.querySelectorAll(".filter").forEach((button) => {
-            button.classList.toggle(
-                "active",
-                button.dataset.filter === activeCategory
-            );
-        });
-
+        document.querySelectorAll(".filter").forEach((b) =>
+            b.classList.toggle("active", b.dataset.filter === activeCategory));
         renderProducts();
-
         mobileMenu?.classList.remove("open");
-    });
-});
-
-// --------------------------------------------------
-// SORTING AND SEARCH
-// --------------------------------------------------
+    }));
 
 $("#sortSelect").addEventListener("change", renderProducts);
-
-$("#searchToggle").addEventListener("click", () => {
-    $("#searchBar").classList.toggle("show");
-});
-
-$("#searchClose").addEventListener("click", () => {
-    $("#searchBar").classList.remove("show");
-});
-
-$("#searchInput").addEventListener("input", (event) => {
-    searchTerm = event.target.value.toLowerCase();
-
+$("#searchToggle").addEventListener("click", () => $("#searchBar").classList.toggle("show"));
+$("#searchClose").addEventListener("click", () => $("#searchBar").classList.remove("show"));
+$("#searchInput").addEventListener("input", (e) => {
+    searchTerm = e.target.value.toLowerCase();
     renderProducts();
 });
 
-// --------------------------------------------------
-// MOBILE MENU TOGGLE
-// --------------------------------------------------
-
 $("#menuToggle").addEventListener("click", () => {
     if (!mobileMenu) return;
-
     const willOpen = !mobileMenu.classList.contains("open");
-
     mobileMenu.classList.toggle("open");
-
-    if (willOpen) {
-        positionMobileMenu();
-    }
+    if (willOpen) positionMobileMenu();
 });
 
 window.addEventListener("resize", () => {
-    if (mobileMenu?.classList.contains("open")) {
-        positionMobileMenu();
-    }
+    if (mobileMenu?.classList.contains("open")) positionMobileMenu();
 });
 
-// --------------------------------------------------
-// CHECKOUT
-// --------------------------------------------------
+// ---------- CHECKOUT ----------
 
 $("#checkoutOpen").addEventListener("click", () => {
-    if (!cart.length) {
-        alert("Your bag is empty.");
-        return;
-    }
-
+    if (!cart.length) return alert("Your bag is empty.");
     $("#checkoutModal").classList.add("open");
 });
 
 $("#checkoutForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-
     const form = new FormData(event.target);
-
     const payload = {
         customer_name: form.get("customer_name"),
         phone: form.get("phone"),
         address: form.get("address"),
-
-        items: cart.map((item) => ({
-            id: item.id,
-            qty: item.qty,
-            size: item.size
-        }))
+        items: cart.map((i) => ({ id: i.id, qty: i.qty, size: i.size }))
     };
 
     try {
         const response = await fetch("/api/orders", {
             method: "POST",
-
-            headers: {
-                "Content-Type": "application/json"
-            },
-
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
         });
-
         const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Order submission failed.");
 
-        if (!response.ok) {
-            throw new Error(data.error || "Order submission failed.");
-        }
-
-        alert(
-            `Thank you! Your order request #${data.orderId} was received. Total: ${money(data.total)}. The store will contact you to confirm delivery.`
-        );
+        alert(`Thank you! Your order request #${data.orderId} was received. Total: ${money(data.total)}. The store will contact you to confirm delivery.`);
 
         cart = [];
-
         renderCart();
-
         $("#checkoutModal").classList.remove("open");
-
         hideCart();
-
         event.target.reset();
-
         await loadProducts();
-
     } catch (error) {
         alert(error.message);
     }
 });
 
-// --------------------------------------------------
-// NEWSLETTER
-// --------------------------------------------------
-
-$("#newsletterForm").addEventListener("submit", (event) => {
-    event.preventDefault();
-
-    $("#newsletterMsg").textContent =
-        "THANK YOU — YOU'RE ON THE LIST.";
-
-    event.target.reset();
+$("#newsletterForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    $("#newsletterMsg").textContent = "THANK YOU — YOU'RE ON THE LIST.";
+    e.target.reset();
 });
 
-// --------------------------------------------------
-// HEADER SCROLL EFFECT
-// --------------------------------------------------
+// ---------- SCROLL EFFECTS ----------
 
 $("#year").textContent = new Date().getFullYear();
 
 window.addEventListener("scroll", () => {
-    $("#header").classList.toggle(
-        "compact",
-        window.scrollY > 70
-    );
-
-    if (mobileMenu?.classList.contains("open")) {
-        positionMobileMenu();
-    }
+    $("#header").classList.toggle("compact", window.scrollY > 70);
+    if (mobileMenu?.classList.contains("open")) positionMobileMenu();
 });
 
-// --------------------------------------------------
-// SCROLL REVEAL
-// --------------------------------------------------
+const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+            entry.target.classList.add("visible");
+            observer.unobserve(entry.target);
+        }
+    });
+}, { threshold: 0.12 });
 
-const observer = new IntersectionObserver(
-    (entries) => {
-        entries.forEach((entry) => {
-            if (entry.isIntersecting) {
-                entry.target.classList.add("visible");
+document.querySelectorAll(".reveal").forEach((el) => observer.observe(el));
 
-                observer.unobserve(entry.target);
-            }
-        });
-    },
-    {
-        threshold: 0.12
-    }
-);
-
-document.querySelectorAll(".reveal").forEach((element) => {
-    observer.observe(element);
-});
-
-// --------------------------------------------------
-// INITIALIZATION
-// --------------------------------------------------
+// ---------- INIT ----------
 
 loadProducts();
-
 renderCart();
