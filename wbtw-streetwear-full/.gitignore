@@ -1,0 +1,19 @@
+
+# Environment secrets
+.env
+.env.local
+.env.production
+
+# Database files
+*.sqlite
+*.db
+
+# Uploaded files
+uploads/
+
+# Dependencies
+node_modules/
+
+# Logs
+npm-debug.log*
+logs/
