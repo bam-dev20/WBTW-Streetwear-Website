@@ -19,6 +19,9 @@ const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
 const isProduction = process.env.NODE_ENV === "production";
 
+const MAX_IMAGES = 8;
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB per image
+
 /* =========================================
    PERSISTENT STORAGE (Railway Volume at /data)
 ========================================= */
@@ -111,6 +114,15 @@ if (productsSql && !productsSql.sql.includes("T-Shirts")) {
   console.log("Migrated products table to allow T-Shirts.");
 }
 
+// Migration: support multiple images per product (stored as a JSON array)
+const hasImagesColumn = db.prepare("PRAGMA table_info(products)").all().some(c => c.name === "images");
+if (!hasImagesColumn) {
+  db.exec("ALTER TABLE products ADD COLUMN images TEXT DEFAULT ''");
+  // Existing single images become the first gallery image
+  db.exec("UPDATE products SET images = json_array(image) WHERE image != ''");
+  console.log("Added images column to products.");
+}
+
 const adminUser = process.env.ADMIN_USERNAME || "admin";
 const adminPass = process.env.ADMIN_PASSWORD || "ChangeThisPassword123!";
 if (!db.prepare("SELECT id FROM admins WHERE username=?").get(adminUser)) {
@@ -120,12 +132,15 @@ if (!db.prepare("SELECT id FROM admins WHERE username=?").get(adminUser)) {
 
 const count = db.prepare("SELECT COUNT(*) AS n FROM products").get().n;
 if (!count) {
-  const seed = db.prepare(`INSERT INTO products(name,category,price,description,image,sizes,colors,stock,featured)
-    VALUES(?,?,?,?,?,?,?,?,?)`);
-  seed.run("WBTW Signature Oversized Tee","Shirts",699,"Premium everyday oversized fit. Designed with purpose.","https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=1000&q=85","S,M,L,XL,XXL","Black,White",30,1);
-  seed.run("The Wise Graphic Tee","Shirts",699,"A graphic staple for everyday confidence.","https://images.unsplash.com/photo-1503341504253-dff4815485f1?auto=format&fit=crop&w=1000&q=85","S,M,L,XL","Black,White",25,1);
-  seed.run("WBTW Heavyweight Hoodie","Hoodies",1299,"A heavyweight layer with a relaxed silhouette.","https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&w=1000&q=85","S,M,L,XL,XXL","Black,Charcoal",18,1);
-  seed.run("Core Pullover Hoodie","Hoodies",1199,"Minimal design. Everyday comfort.","https://images.unsplash.com/photo-1578681994506-b8f463449011?auto=format&fit=crop&w=1000&q=85","S,M,L,XL","Black,Grey",12,0);
+  const seed = db.prepare(`INSERT INTO products(name,category,price,description,image,images,sizes,colors,stock,featured)
+    VALUES(?,?,?,?,?,?,?,?,?,?)`);
+  const seedProduct = (name, category, price, description, image, sizes, colors, stock, featured) =>
+    seed.run(name, category, price, description, image, JSON.stringify([image]), sizes, colors, stock, featured);
+
+  seedProduct("WBTW Signature Oversized Tee","Shirts",699,"Premium everyday oversized fit. Designed with purpose.","https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=1000&q=85","S,M,L,XL,XXL","Black,White",30,1);
+  seedProduct("The Wise Graphic Tee","Shirts",699,"A graphic staple for everyday confidence.","https://images.unsplash.com/photo-1503341504253-dff4815485f1?auto=format&fit=crop&w=1000&q=85","S,M,L,XL","Black,White",25,1);
+  seedProduct("WBTW Heavyweight Hoodie","Hoodies",1299,"A heavyweight layer with a relaxed silhouette.","https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&w=1000&q=85","S,M,L,XL,XXL","Black,Charcoal",18,1);
+  seedProduct("Core Pullover Hoodie","Hoodies",1199,"Minimal design. Everyday comfort.","https://images.unsplash.com/photo-1578681994506-b8f463449011?auto=format&fit=crop&w=1000&q=85","S,M,L,XL","Black,Grey",12,0);
 }
 
 /* =========================================
@@ -181,7 +196,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: MAX_IMAGE_SIZE, files: MAX_IMAGES },
   fileFilter: (req, file, cb) => {
     const ok = /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype);
     cb(ok ? null : new Error("Only JPG, PNG, WEBP or GIF images are allowed."), ok);
@@ -195,21 +210,43 @@ function removeUpload(imagePath) {
   fs.unlink(file, () => {});
 }
 
+// Delete all files uploaded during a failed request
+function cleanupFiles(files) {
+  (files || []).forEach(f => removeUpload("/uploads/" + f.filename));
+}
+
 function requireAdmin(req, res, next) {
   if (req.session.adminId) return next();
   return res.status(401).json({ error: "Please sign in again." });
 }
 
 /* =========================================
+   PRODUCT HELPERS
+========================================= */
+// Returns the product's images as an array (falls back to the legacy single `image`)
+function parseImages(p) {
+  try {
+    const arr = JSON.parse(p.images || "[]");
+    if (Array.isArray(arr) && arr.length) return arr;
+  } catch {}
+  return p.image ? [p.image] : [];
+}
+
+const shapeProduct = p => {
+  const images = parseImages(p);
+  return {
+    ...p,
+    images,
+    image: images[0] || "", // first image stays the "main" image for the storefront
+    sizes: p.sizes.split(",").filter(Boolean),
+    colors: p.colors.split(",").filter(Boolean),
+    featured: !!p.featured
+  };
+};
+
+/* =========================================
    PUBLIC API
 ========================================= */
-const shapeProduct = p => ({
-  ...p,
-  sizes: p.sizes.split(",").filter(Boolean),
-  colors: p.colors.split(",").filter(Boolean),
-  featured: !!p.featured
-});
-
 app.get("/api/products", (req, res) => {
   const rows = db.prepare("SELECT * FROM products WHERE active=1 ORDER BY featured DESC, created_at DESC").all();
   res.json(rows.map(shapeProduct));
@@ -267,7 +304,19 @@ app.get("/api/admin/products", requireAdmin, (req, res) => {
   res.json(rows.map(p => ({ ...shapeProduct(p), active: !!p.active })));
 });
 
-function productInput(body, file) {
+// Accepts a JSON array string of image paths/URLs and keeps only safe values
+function parseImageList(value) {
+  try {
+    const arr = JSON.parse(value || "[]");
+    return Array.isArray(arr)
+      ? arr.filter(x => typeof x === "string" && (x.startsWith("/uploads/") || x.startsWith("https://")))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function productInput(body, files = []) {
   const name = String(body.name || "").trim();
   const category = String(body.category || "").trim();
   const price = Number(body.price);
@@ -279,13 +328,26 @@ function productInput(body, file) {
     throw new Error("Enter a product name, valid category and price.");
   }
 
+  // 1) images kept from before, 2) optional pasted URL, 3) newly uploaded files
+  const images = parseImageList(body.existingImages);
+  const url = String(body.image || "").trim();
+  if (url && (url.startsWith("/uploads/") || url.startsWith("https://")) && !images.includes(url)) {
+    images.push(url);
+  }
+  for (const f of files) images.push("/uploads/" + f.filename);
+
+  if (images.length > MAX_IMAGES) {
+    throw new Error(`You can only have up to ${MAX_IMAGES} images per product.`);
+  }
+
   return {
     name,
     category,
     price,
     compare_price: body.compare_price ? Number(body.compare_price) : null,
     description: String(body.description || ""),
-    image: file ? "/uploads/" + file.filename : String(body.image || ""),
+    image: images[0] || "",
+    images: JSON.stringify(images),
     sizes: String(body.sizes || "S,M,L,XL").split(",").map(x => x.trim()).filter(Boolean).join(","),
     colors: String(body.colors || "").split(",").map(x => x.trim()).filter(Boolean).join(","),
     stock,
@@ -294,46 +356,47 @@ function productInput(body, file) {
   };
 }
 
-app.post("/api/admin/products", requireAdmin, upload.single("imageFile"), (req, res) => {
+app.post("/api/admin/products", requireAdmin, upload.array("imageFiles", MAX_IMAGES), (req, res) => {
   try {
-    const p = productInput(req.body, req.file);
-    const r = db.prepare(`INSERT INTO products(name,category,price,compare_price,description,image,sizes,colors,stock,featured,active)
-      VALUES(@name,@category,@price,@compare_price,@description,@image,@sizes,@colors,@stock,@featured,@active)`).run(p);
-    res.json({ ok: true, id: r.lastInsertRowid, image: p.image });
+    const p = productInput(req.body, req.files);
+    const r = db.prepare(`INSERT INTO products(name,category,price,compare_price,description,image,images,sizes,colors,stock,featured,active)
+      VALUES(@name,@category,@price,@compare_price,@description,@image,@images,@sizes,@colors,@stock,@featured,@active)`).run(p);
+    res.json({ ok: true, id: r.lastInsertRowid, images: JSON.parse(p.images) });
   } catch (e) {
-    if (req.file) removeUpload("/uploads/" + req.file.filename); // don't leave orphan files
+    cleanupFiles(req.files); // don't leave orphan files
     res.status(400).json({ error: e.message });
   }
 });
 
-app.put("/api/admin/products/:id", requireAdmin, upload.single("imageFile"), (req, res) => {
+app.put("/api/admin/products/:id", requireAdmin, upload.array("imageFiles", MAX_IMAGES), (req, res) => {
   try {
     const old = db.prepare("SELECT * FROM products WHERE id=?").get(req.params.id);
     if (!old) {
-      if (req.file) removeUpload("/uploads/" + req.file.filename);
+      cleanupFiles(req.files);
       return res.status(404).json({ error: "Product not found." });
     }
-    const p = productInput(req.body, req.file);
-    if (!req.file && !req.body.image) p.image = old.image;
+    const p = productInput(req.body, req.files);
 
     db.prepare(`UPDATE products SET name=@name,category=@category,price=@price,compare_price=@compare_price,
-      description=@description,image=@image,sizes=@sizes,colors=@colors,stock=@stock,featured=@featured,active=@active WHERE id=@id`)
+      description=@description,image=@image,images=@images,sizes=@sizes,colors=@colors,stock=@stock,
+      featured=@featured,active=@active WHERE id=@id`)
       .run({ ...p, id: old.id });
 
-    // Remove the previous uploaded image once it has been replaced
-    if (p.image !== old.image) removeUpload(old.image);
+    // Delete uploaded files that were removed from the gallery
+    const kept = new Set(JSON.parse(p.images));
+    parseImages(old).filter(img => !kept.has(img)).forEach(removeUpload);
 
-    res.json({ ok: true, image: p.image });
+    res.json({ ok: true, images: JSON.parse(p.images) });
   } catch (e) {
-    if (req.file) removeUpload("/uploads/" + req.file.filename);
+    cleanupFiles(req.files);
     res.status(400).json({ error: e.message });
   }
 });
 
 app.delete("/api/admin/products/:id", requireAdmin, (req, res) => {
-  const old = db.prepare("SELECT image FROM products WHERE id=?").get(req.params.id);
+  const old = db.prepare("SELECT image, images FROM products WHERE id=?").get(req.params.id);
   db.prepare("DELETE FROM products WHERE id=?").run(req.params.id);
-  if (old) removeUpload(old.image);
+  if (old) parseImages(old).forEach(removeUpload);
   res.json({ ok: true });
 });
 
@@ -361,8 +424,9 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 
 app.use((err, req, res, next) => {
   console.error(err);
-  const message = err.code === "LIMIT_FILE_SIZE"
-    ? "Image is too large. Maximum size is 5 MB."
+  const message =
+    err.code === "LIMIT_FILE_SIZE" ? "Each image must be 5 MB or smaller."
+    : err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE" ? `You can only upload up to ${MAX_IMAGES} images.`
     : err.message || "Something went wrong.";
   res.status(400).json({ error: message });
 });
