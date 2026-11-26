@@ -1363,3 +1363,120 @@ MOBILE STYLES (max-width: 620px)
 */
 
 /* Add more product IDs as needed by copying a block above. */
+/* =========================================================
+   PRODUCT GALLERY — paste at the VERY BOTTOM of style.css
+   (it must come after the existing .product-modal-card rules)
+   ========================================================= */
+
+/* Photo count badge on product cards */
+.photo-count {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  z-index: 1;
+  background: var(--black);
+  color: var(--white);
+  padding: 6px 8px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+
+/* Modal gallery layout */
+.modal-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.modal-main {
+  position: relative;
+  background: #e5e3dd;
+}
+.product-modal-card .modal-main img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3/4;
+  object-fit: cover;
+}
+
+/* Thumbnails: up to 8 images, 4 per row */
+.modal-thumbs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.modal-thumb {
+  padding: 0;
+  border: 0;
+  background: #e5e3dd;
+  aspect-ratio: 1;
+  overflow: hidden;
+  cursor: pointer;
+  opacity: .55;
+  outline: 0;
+  transition: opacity .2s;
+}
+.modal-thumb:hover { opacity: .85; }
+.modal-thumb.active {
+  opacity: 1;
+  outline: 2px solid var(--black);
+  outline-offset: -2px;
+}
+/* Overrides the generic ".product-modal-card img" 3/4 rule */
+.product-modal-card .modal-thumb img {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+
+/* Prev / next arrows + counter */
+.gallery-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 38px;
+  height: 38px;
+  border: 0;
+  background: rgba(241, 240, 235, .92);
+  color: var(--black);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+}
+.gallery-arrow.prev { left: 8px; }
+.gallery-arrow.next { right: 8px; }
+.gallery-arrow:hover { background: var(--white); }
+.gallery-counter {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  background: var(--black);
+  color: var(--white);
+  padding: 5px 8px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+
+@media (max-width: 620px) {
+  .product-modal-card .modal-main img {
+    max-height: 360px;
+    aspect-ratio: 4/5;
+  }
+  .modal-thumbs { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .gallery-arrow { width: 34px; height: 34px; }
+}
+
+/* =========================================================
+   SMALL FIXES FOR EXISTING RULES (edit these in place)
+   ========================================================= */
+/* 1) Typo: "--White" is not defined (variables are case-sensitive).
+      Change in .pill-button:hover  ->  background: var(--white);   */
+/* 2) In the 620px block, change  .footer .wordmark::before
+      to  .footer-logo::before  (the footer has no ".footer" class). */
+/* 3) In the 620px block, delete  background:"";  inside
+      ".product-modal-card img" (invalid value). */
