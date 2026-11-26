@@ -1,7 +1,36 @@
 ﻿const $ = (s) => document.querySelector(s);
 
+// ---------- BAG STORAGE (saved in the visitor's browser) ----------
+
+const CART_KEY = "wbtw_cart_v1";
+
+function loadCart() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(CART_KEY) || "[]");
+        if (!Array.isArray(saved)) return [];
+        return saved
+            .filter((i) => i && i.id != null && Number(i.qty) > 0)
+            .map((i) => ({
+                id: i.id,
+                name: String(i.name || ""),
+                price: Number(i.price) || 0,
+                image: String(i.image || ""),
+                size: String(i.size || ""),
+                qty: Math.min(20, Math.max(1, parseInt(i.qty, 10) || 1))
+            }));
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveCart() {
+    try {
+        localStorage.setItem(CART_KEY, JSON.stringify(cart));
+    } catch (e) { /* storage unavailable (e.g. private mode): bag still works until refresh */ }
+}
+
 let products = [];
-let cart = [];
+let cart = loadCart();
 let activeCategory = "All";
 let searchTerm = "";
 let galleryImages = [];
@@ -62,12 +91,33 @@ async function loadProducts() {
         const response = await fetch("/api/products", { cache: "no-store" });
         if (!response.ok) throw new Error("Unable to load products.");
         products = await response.json();
+        syncCartWithProducts();
+        renderCart();
         renderProducts();
     } catch (error) {
         console.error("Product loading error:", error);
         $("#productGrid").innerHTML =
             '<p class="no-products">STORE CONNECTION UNAVAILABLE. PLEASE REFRESH.</p>';
     }
+}
+
+// Keeps a saved bag correct: removes unavailable items, refreshes price/name, caps quantity at stock.
+function syncCartWithProducts() {
+    cart = cart.filter((item) => {
+        const p = products.find((x) => String(x.id) === String(item.id));
+        if (!p || Number(p.stock) <= 0) return false;
+        if (Array.isArray(p.sizes) && p.sizes.length && !p.sizes.includes(item.size)) return false;
+        item.name = p.name;
+        item.price = p.price;
+        item.image = productImages(p)[0] || item.image;
+        item.qty = Math.min(item.qty, Number(p.stock), 20);
+        return item.qty > 0;
+    });
+}
+
+function stockFor(id) {
+    const p = products.find((x) => String(x.id) === String(id));
+    return p ? Number(p.stock) || 0 : Infinity;
 }
 
 function filteredProducts() {
@@ -132,9 +182,15 @@ function hideCart() {
 
 function addCart(product, size) {
     if (!product) return;
+    const max = Math.min(20, Number(product.stock) || 0);
     const found = cart.find((i) => i.id === product.id && i.size === size);
+
     if (found) {
-        found.qty++;
+        if (found.qty >= max) {
+            alert(`Only ${max} available for this item.`);
+        } else {
+            found.qty++;
+        }
     } else {
         cart.push({
             id: product.id, name: product.name, price: product.price,
@@ -177,12 +233,15 @@ function renderCart() {
                         data-index="${index}">REMOVE</button>
             </div>`).join("")
         : '<p class="empty-cart">YOUR BAG IS EMPTY.</p>';
+
+    saveCart();
 }
 
 function changeQty(index, amount) {
     const item = cart[index];
     if (!item) return;
-    item.qty += amount;
+    const max = Math.min(20, stockFor(item.id));
+    item.qty = Math.min(max, item.qty + amount);
     if (item.qty < 1) cart.splice(index, 1);
     renderCart();
 }
@@ -471,6 +530,230 @@ const observer = new IntersectionObserver((entries) => {
 }, { threshold: 0.12 });
 
 document.querySelectorAll(".reveal").forEach((el) => observer.observe(el));
+
+// ---------- CUSTOMER ACCOUNT (email one-time code) ----------
+
+let customer = null;
+let pendingEmail = "";
+
+async function authApi(url, options = {}) {
+    const response = await fetch(url, {
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        ...options
+    });
+    let data = {};
+    try { data = await response.json(); } catch (e) { /* no body */ }
+    if (!response.ok) throw new Error(data.error || "Something went wrong. Please try again.");
+    return data;
+}
+
+// Sign-in window (built here, so no HTML changes are needed)
+const authModal = document.createElement("div");
+authModal.className = "modal";
+authModal.id = "authModal";
+authModal.innerHTML = `
+    <div class="modal-card checkout-card">
+        <button type="button" class="modal-x" data-auth-close aria-label="Close">×</button>
+        <div id="authBody"></div>
+    </div>`;
+document.body.appendChild(authModal);
+
+// LOGIN / ACCOUNT button next to the bag
+const accountBtn = document.createElement("button");
+accountBtn.type = "button";
+accountBtn.id = "accountToggle";
+accountBtn.className = "icon-btn";
+accountBtn.style.cssText = "font-size:10px;font-weight:700;letter-spacing:.12em";
+$("#bagToggle").before(accountBtn);
+
+function updateAccountButton() {
+    accountBtn.textContent = customer ? "ACCOUNT" : "LOGIN";
+}
+
+function setAuthMsg(text, isError = true) {
+    const el = $("#authMsg");
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = isError ? "#b00020" : "#2e7d32";
+}
+
+async function loadMyOrders() {
+    const box = $("#authOrders");
+    if (!box) return;
+    try {
+        const orders = await authApi("/api/account/orders");
+        box.innerHTML = orders.length
+            ? orders.map((o) => `
+                <div class="cart-line" style="grid-template-columns:1fr auto">
+                    <div>
+                        #${esc(o.id)} · ${esc(o.status)}
+                        <div>${o.items.map((i) => `${esc(i.name)} × ${esc(i.qty)}`).join(", ")}</div>
+                    </div>
+                    <strong>${money(o.total)}</strong>
+                </div>`).join("")
+            : '<p class="form-note">NO ORDERS YET.</p>';
+    } catch (e) {
+        box.innerHTML = "";
+    }
+}
+
+function authView(view) {
+    const body = $("#authBody");
+
+    if (view === "email") {
+        body.innerHTML = `
+            <p class="kicker">WBTW / ACCOUNT</p>
+            <h3>SIGN IN OR REGISTER</h3>
+            <p class="form-note">Enter your email and we'll send you a 6-digit code. No password needed. New here? Your account is created automatically.</p>
+            <form id="authEmailForm">
+                <label>EMAIL
+                    <input type="email" name="email" autocomplete="email" required value="${esc(pendingEmail)}">
+                </label>
+                <p class="form-note" id="authMsg" role="alert"></p>
+                <button type="submit" class="pill-button">CONTINUE WITH EMAIL ↗</button>
+            </form>
+            <p class="form-note">You can also keep shopping and check out as a guest.</p>`;
+    } else if (view === "code") {
+        body.innerHTML = `
+            <p class="kicker">WBTW / ACCOUNT</p>
+            <h3>CHECK YOUR EMAIL</h3>
+            <form id="authCodeForm">
+                <label>6-DIGIT CODE
+                    <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code"
+                           maxlength="6" pattern="[0-9]{6}" required>
+                </label>
+                <p class="form-note" id="authMsg" role="alert"></p>
+                <button type="submit" class="pill-button">VERIFY &amp; CONTINUE ↗</button>
+            </form>
+            <p class="form-note">
+                <button type="button" data-auth-action="resend" style="border:0;background:none;text-decoration:underline;cursor:pointer;padding:0">Resend code</button>
+                &nbsp;·&nbsp;
+                <button type="button" data-auth-action="change-email" style="border:0;background:none;text-decoration:underline;cursor:pointer;padding:0">Use a different email</button>
+            </p>`;
+    } else {
+        body.innerHTML = `
+            <p class="kicker">WBTW / ACCOUNT</p>
+            <h3>MY ACCOUNT</h3>
+            <p class="form-note">${esc(customer.email)}</p>
+            <form id="authProfileForm">
+                <label>FULL NAME <input type="text" name="name" autocomplete="name" value="${esc(customer.name)}"></label>
+                <label>PHONE <input type="tel" name="phone" autocomplete="tel" value="${esc(customer.phone)}"></label>
+                <label>DELIVERY ADDRESS <textarea name="address" rows="3" autocomplete="street-address">${esc(customer.address)}</textarea></label>
+                <p class="form-note" id="authMsg" role="alert"></p>
+                <button type="submit" class="pill-button">SAVE DETAILS ↗</button>
+            </form>
+            <h3 style="font-size:28px;margin-top:24px">MY ORDERS</h3>
+            <div id="authOrders"></div>
+            <p class="form-note">
+                <button type="button" data-auth-action="logout" style="border:0;background:none;text-decoration:underline;cursor:pointer;padding:0">Log out</button>
+            </p>`;
+        loadMyOrders();
+    }
+}
+
+accountBtn.addEventListener("click", () => {
+    authView(customer ? "account" : "email");
+    authModal.classList.add("open");
+});
+
+authModal.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.target;
+    const button = form.querySelector('[type="submit"]');
+    button.disabled = true;
+    setAuthMsg("");
+
+    try {
+        if (form.id === "authEmailForm") {
+            pendingEmail = form.elements.email.value.trim();
+            await authApi("/api/auth/request-code", {
+                method: "POST",
+                body: JSON.stringify({ email: pendingEmail })
+            });
+            authView("code");
+            setAuthMsg(`We sent a 6-digit code to ${pendingEmail}.`, false);
+        } else if (form.id === "authCodeForm") {
+            const data = await authApi("/api/auth/verify-code", {
+                method: "POST",
+                body: JSON.stringify({ email: pendingEmail, code: form.elements.code.value })
+            });
+            customer = data.customer;
+            updateAccountButton();
+            authView("account");
+            setAuthMsg(data.isNew ? "Welcome to WBTW! Your account is ready." : "You're signed in.", false);
+        } else if (form.id === "authProfileForm") {
+            const data = await authApi("/api/auth/profile", {
+                method: "PUT",
+                body: JSON.stringify({
+                    name: form.elements.name.value,
+                    phone: form.elements.phone.value,
+                    address: form.elements.address.value
+                })
+            });
+            customer = data.customer;
+            setAuthMsg("Saved.", false);
+        }
+    } catch (error) {
+        setAuthMsg(error.message);
+    } finally {
+        button.disabled = false;
+    }
+});
+
+authModal.addEventListener("click", async (event) => {
+    if (event.target === authModal || event.target.closest("[data-auth-close]")) {
+        authModal.classList.remove("open");
+        return;
+    }
+
+    const btn = event.target.closest("[data-auth-action]");
+    if (!btn) return;
+
+    try {
+        if (btn.dataset.authAction === "resend") {
+            await authApi("/api/auth/request-code", {
+                method: "POST",
+                body: JSON.stringify({ email: pendingEmail })
+            });
+            setAuthMsg("A new code has been sent.", false);
+        }
+        if (btn.dataset.authAction === "change-email") authView("email");
+        if (btn.dataset.authAction === "logout") {
+            await authApi("/api/auth/logout", { method: "POST" });
+            customer = null;
+            updateAccountButton();
+            authModal.classList.remove("open");
+        }
+    } catch (error) {
+        setAuthMsg(error.message);
+    }
+});
+
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") authModal.classList.remove("open");
+});
+
+// Fill the checkout form from the saved account details
+$("#checkoutOpen").addEventListener("click", () => {
+    const form = $("#checkoutForm");
+    if (!customer || !form) return;
+    [["customer_name", customer.name], ["phone", customer.phone], ["address", customer.address]]
+        .forEach(([field, value]) => {
+            if (form.elements[field] && !form.elements[field].value && value) {
+                form.elements[field].value = value;
+            }
+        });
+});
+
+// Restore the session on page load
+updateAccountButton();
+authApi("/api/auth/me")
+    .then((data) => {
+        customer = data.authenticated ? data.customer : null;
+        updateAccountButton();
+    })
+    .catch(() => updateAccountButton());
 
 // ---------- INIT ----------
 

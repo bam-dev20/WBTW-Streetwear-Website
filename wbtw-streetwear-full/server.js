@@ -9,6 +9,7 @@ const rateLimit = require("express-rate-limit");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const app = express();
 
@@ -18,9 +19,6 @@ app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
 const isProduction = process.env.NODE_ENV === "production";
-
-const MAX_IMAGES = 8;
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB per image
 
 /* =========================================
    PERSISTENT STORAGE (Railway Volume at /data)
@@ -114,13 +112,37 @@ if (productsSql && !productsSql.sql.includes("T-Shirts")) {
   console.log("Migrated products table to allow T-Shirts.");
 }
 
-// Migration: support multiple images per product (stored as a JSON array)
-const hasImagesColumn = db.prepare("PRAGMA table_info(products)").all().some(c => c.name === "images");
-if (!hasImagesColumn) {
-  db.exec("ALTER TABLE products ADD COLUMN images TEXT DEFAULT ''");
-  // Existing single images become the first gallery image
-  db.exec("UPDATE products SET images = json_array(image) WHERE image != ''");
+// Migration: gallery support (JSON array of image paths; "image" stays as the cover)
+if (!db.prepare("PRAGMA table_info(products)").all().some(c => c.name === "images")) {
+  db.exec("ALTER TABLE products ADD COLUMN images TEXT DEFAULT '[]'");
   console.log("Added images column to products.");
+}
+
+// Customer accounts (email one-time code sign-in)
+db.exec(`
+CREATE TABLE IF NOT EXISTS customers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT DEFAULT '',
+  phone TEXT DEFAULT '',
+  address TEXT DEFAULT '',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_login_at TEXT
+);
+CREATE TABLE IF NOT EXISTS login_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER DEFAULT 0,
+  used INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email);
+`);
+if (!db.prepare("PRAGMA table_info(orders)").all().some(c => c.name === "customer_id")) {
+  db.exec("ALTER TABLE orders ADD COLUMN customer_id INTEGER DEFAULT NULL");
+  console.log("Added customer_id column to orders.");
 }
 
 const adminUser = process.env.ADMIN_USERNAME || "admin";
@@ -132,15 +154,12 @@ if (!db.prepare("SELECT id FROM admins WHERE username=?").get(adminUser)) {
 
 const count = db.prepare("SELECT COUNT(*) AS n FROM products").get().n;
 if (!count) {
-  const seed = db.prepare(`INSERT INTO products(name,category,price,description,image,images,sizes,colors,stock,featured)
-    VALUES(?,?,?,?,?,?,?,?,?,?)`);
-  const seedProduct = (name, category, price, description, image, sizes, colors, stock, featured) =>
-    seed.run(name, category, price, description, image, JSON.stringify([image]), sizes, colors, stock, featured);
-
-  seedProduct("WBTW Signature Oversized Tee","Shirts",699,"Premium everyday oversized fit. Designed with purpose.","https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=1000&q=85","S,M,L,XL,XXL","Black,White",30,1);
-  seedProduct("The Wise Graphic Tee","Shirts",699,"A graphic staple for everyday confidence.","https://images.unsplash.com/photo-1503341504253-dff4815485f1?auto=format&fit=crop&w=1000&q=85","S,M,L,XL","Black,White",25,1);
-  seedProduct("WBTW Heavyweight Hoodie","Hoodies",1299,"A heavyweight layer with a relaxed silhouette.","https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&w=1000&q=85","S,M,L,XL,XXL","Black,Charcoal",18,1);
-  seedProduct("Core Pullover Hoodie","Hoodies",1199,"Minimal design. Everyday comfort.","https://images.unsplash.com/photo-1578681994506-b8f463449011?auto=format&fit=crop&w=1000&q=85","S,M,L,XL","Black,Grey",12,0);
+  const seed = db.prepare(`INSERT INTO products(name,category,price,description,image,sizes,colors,stock,featured)
+    VALUES(?,?,?,?,?,?,?,?,?)`);
+  seed.run("WBTW Signature Oversized Tee","Shirts",699,"Premium everyday oversized fit. Designed with purpose.","https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=1000&q=85","S,M,L,XL,XXL","Black,White",30,1);
+  seed.run("The Wise Graphic Tee","Shirts",699,"A graphic staple for everyday confidence.","https://images.unsplash.com/photo-1503341504253-dff4815485f1?auto=format&fit=crop&w=1000&q=85","S,M,L,XL","Black,White",25,1);
+  seed.run("WBTW Heavyweight Hoodie","Hoodies",1299,"A heavyweight layer with a relaxed silhouette.","https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&w=1000&q=85","S,M,L,XL,XXL","Black,Charcoal",18,1);
+  seed.run("Core Pullover Hoodie","Hoodies",1199,"Minimal design. Everyday comfort.","https://images.unsplash.com/photo-1578681994506-b8f463449011?auto=format&fit=crop&w=1000&q=85","S,M,L,XL","Black,Grey",12,0);
 }
 
 /* =========================================
@@ -196,12 +215,24 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: MAX_IMAGE_SIZE, files: MAX_IMAGES },
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ok = /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype);
     cb(ok ? null : new Error("Only JPG, PNG, WEBP or GIF images are allowed."), ok);
   }
 });
+
+const MAX_IMAGES = 8;
+
+// Accepts the new multi-image field and the old single-image field
+const uploadImages = upload.fields([
+  { name: "imageFiles", maxCount: MAX_IMAGES },
+  { name: "imageFile", maxCount: 1 }
+]);
+const uploadedFiles = req => {
+  const f = req.files || {};
+  return [...(f.imageFiles || []), ...(f.imageFile || [])];
+};
 
 // Delete a stored upload file (only files inside /uploads/)
 function removeUpload(imagePath) {
@@ -210,43 +241,37 @@ function removeUpload(imagePath) {
   fs.unlink(file, () => {});
 }
 
-// Delete all files uploaded during a failed request
-function cleanupFiles(files) {
-  (files || []).forEach(f => removeUpload("/uploads/" + f.filename));
-}
-
 function requireAdmin(req, res, next) {
   if (req.session.adminId) return next();
   return res.status(401).json({ error: "Please sign in again." });
 }
 
 /* =========================================
-   PRODUCT HELPERS
-========================================= */
-// Returns the product's images as an array (falls back to the legacy single `image`)
-function parseImages(p) {
-  try {
-    const arr = JSON.parse(p.images || "[]");
-    if (Array.isArray(arr) && arr.length) return arr;
-  } catch {}
-  return p.image ? [p.image] : [];
-}
-
-const shapeProduct = p => {
-  const images = parseImages(p);
-  return {
-    ...p,
-    images,
-    image: images[0] || "", // first image stays the "main" image for the storefront
-    sizes: p.sizes.split(",").filter(Boolean),
-    colors: p.colors.split(",").filter(Boolean),
-    featured: !!p.featured
-  };
-};
-
-/* =========================================
    PUBLIC API
 ========================================= */
+function parseList(value) {
+  try {
+    const a = JSON.parse(value);
+    return Array.isArray(a) ? a.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+// All images of a product (cover first). Falls back to the old single "image" column.
+function imagesOf(row) {
+  const list = parseList(row.images);
+  return list.length ? list : (row.image ? [row.image] : []);
+}
+
+const shapeProduct = p => ({
+  ...p,
+  images: imagesOf(p),
+  sizes: p.sizes.split(",").filter(Boolean),
+  colors: p.colors.split(",").filter(Boolean),
+  featured: !!p.featured
+});
+
 app.get("/api/products", (req, res) => {
   const rows = db.prepare("SELECT * FROM products WHERE active=1 ORDER BY featured DESC, created_at DESC").all();
   res.json(rows.map(shapeProduct));
@@ -273,11 +298,177 @@ app.post("/api/orders", (req, res) => {
     total += p.price * qty;
     clean.push({ id: p.id, name: p.name, price: p.price, qty, size: String(item.size || "") });
   }
-  const result = db.prepare("INSERT INTO orders(customer_name,phone,address,items,total) VALUES(?,?,?,?,?)")
-    .run(customer_name, phone, address, JSON.stringify(clean), total);
+  const result = db.prepare("INSERT INTO orders(customer_name,phone,address,items,total,customer_id) VALUES(?,?,?,?,?,?)")
+    .run(customer_name, phone, address, JSON.stringify(clean), total, req.session.customerId || null);
   for (const item of clean)
     db.prepare("UPDATE products SET stock=stock-? WHERE id=?").run(item.qty, item.id);
   res.json({ ok: true, orderId: result.lastInsertRowid, total });
+});
+
+/* =========================================
+   CUSTOMER ACCOUNTS (email one-time code)
+   Customers enter their email, receive a 6-digit code, and are signed in.
+   New emails are registered automatically on first sign-in.
+========================================= */
+const CODE_TTL_MS = 10 * 60 * 1000;          // code valid for 10 minutes
+const CODE_RESEND_MS = 60 * 1000;            // 1 minute between codes per email
+const CUSTOMER_SESSION_MS = 30 * 24 * 60 * 60 * 1000; // stay signed in 30 days
+
+const codeRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please try again later." }
+});
+const codeVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many attempts. Please try again later." }
+});
+
+const normalizeEmail = v => String(v || "").trim().toLowerCase();
+const isEmail = v => v.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+const hashCode = (email, code) =>
+  crypto.createHash("sha256")
+    .update(`${email}:${code}:${process.env.SESSION_SECRET || "development-only-change-me"}`)
+    .digest("hex");
+
+const publicCustomer = c => ({ id: c.id, email: c.email, name: c.name, phone: c.phone, address: c.address });
+
+// Sends the code with Resend's HTTP API (Railway blocks SMTP on most plans)
+async function sendLoginCode(email, code) {
+  const key = process.env.RESEND_API_KEY;
+
+  if (!key) {
+    if (isProduction) throw new Error("Email sign-in is not set up yet. Please try again later.");
+    console.log(`[DEV] Sign-in code for ${email}: ${code}`);
+    return;
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: process.env.MAIL_FROM || "WBTW <onboarding@resend.dev>",
+      to: [email],
+      subject: `Your WBTW sign-in code: ${code}`,
+      text: `Your WBTW sign-in code is ${code}.\n\nIt expires in 10 minutes. If you didn't request it, you can ignore this email.`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:420px;margin:auto;padding:24px">
+        <h2 style="margin:0 0 12px">WBTW</h2>
+        <p>Your sign-in code is:</p>
+        <p style="font-size:34px;font-weight:700;letter-spacing:6px;margin:12px 0">${code}</p>
+        <p style="color:#666;font-size:13px">It expires in 10 minutes. If you didn't request it, you can ignore this email.</p>
+      </div>`
+    })
+  });
+
+  if (!response.ok) {
+    console.error("Email send failed:", response.status, await response.text());
+    throw new Error("We couldn't send the email. Please try again.");
+  }
+}
+
+function requireCustomer(req, res, next) {
+  if (req.session.customerId) return next();
+  return res.status(401).json({ error: "Please sign in." });
+}
+
+app.post("/api/auth/request-code", codeRequestLimiter, async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  if (!isEmail(email)) return res.status(400).json({ error: "Please enter a valid email address." });
+
+  const now = Date.now();
+  db.prepare("DELETE FROM login_codes WHERE created_at < ?").run(now - 24 * 60 * 60 * 1000);
+
+  const last = db.prepare("SELECT created_at FROM login_codes WHERE email=? ORDER BY id DESC LIMIT 1").get(email);
+  if (last && now - last.created_at < CODE_RESEND_MS) {
+    return res.status(429).json({ error: "Please wait a minute before requesting another code." });
+  }
+
+  const code = String(crypto.randomInt(100000, 1000000));
+  db.prepare("UPDATE login_codes SET used=1 WHERE email=? AND used=0").run(email);
+  db.prepare("INSERT INTO login_codes(email,code_hash,expires_at,created_at) VALUES(?,?,?,?)")
+    .run(email, hashCode(email, code), now + CODE_TTL_MS, now);
+
+  try {
+    await sendLoginCode(email, code);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/auth/verify-code", codeVerifyLimiter, (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const code = String(req.body?.code || "").replace(/\D/g, "");
+  if (!isEmail(email) || code.length !== 6) {
+    return res.status(400).json({ error: "Enter the 6-digit code from your email." });
+  }
+
+  const row = db.prepare("SELECT * FROM login_codes WHERE email=? AND used=0 ORDER BY id DESC LIMIT 1").get(email);
+  if (!row || row.expires_at < Date.now()) {
+    return res.status(400).json({ error: "That code has expired. Please request a new one." });
+  }
+  if (row.attempts >= 5) {
+    db.prepare("UPDATE login_codes SET used=1 WHERE id=?").run(row.id);
+    return res.status(400).json({ error: "Too many incorrect attempts. Please request a new code." });
+  }
+
+  const ok = crypto.timingSafeEqual(Buffer.from(hashCode(email, code)), Buffer.from(row.code_hash));
+  if (!ok) {
+    db.prepare("UPDATE login_codes SET attempts=attempts+1 WHERE id=?").run(row.id);
+    return res.status(400).json({ error: "Incorrect code. Please try again." });
+  }
+
+  db.prepare("UPDATE login_codes SET used=1 WHERE id=?").run(row.id);
+
+  let customer = db.prepare("SELECT * FROM customers WHERE email=?").get(email);
+  let isNew = false;
+  if (!customer) {
+    const r = db.prepare("INSERT INTO customers(email,last_login_at) VALUES(?,CURRENT_TIMESTAMP)").run(email);
+    customer = db.prepare("SELECT * FROM customers WHERE id=?").get(r.lastInsertRowid);
+    isNew = true;
+  } else {
+    db.prepare("UPDATE customers SET last_login_at=CURRENT_TIMESTAMP WHERE id=?").run(customer.id);
+  }
+
+  req.session.regenerate(err => {
+    if (err) return res.status(500).json({ error: "Could not sign you in. Please try again." });
+    req.session.customerId = customer.id;
+    req.session.cookie.maxAge = CUSTOMER_SESSION_MS;
+    res.json({ ok: true, isNew, customer: publicCustomer(customer) });
+  });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  const customer = req.session.customerId
+    ? db.prepare("SELECT * FROM customers WHERE id=?").get(req.session.customerId)
+    : null;
+  res.json(customer ? { authenticated: true, customer: publicCustomer(customer) } : { authenticated: false });
+});
+
+app.put("/api/auth/profile", requireCustomer, (req, res) => {
+  const name = String(req.body?.name || "").trim().slice(0, 100);
+  const phone = String(req.body?.phone || "").trim().slice(0, 30);
+  const address = String(req.body?.address || "").trim().slice(0, 300);
+  db.prepare("UPDATE customers SET name=?, phone=?, address=? WHERE id=?").run(name, phone, address, req.session.customerId);
+  const customer = db.prepare("SELECT * FROM customers WHERE id=?").get(req.session.customerId);
+  res.json({ ok: true, customer: publicCustomer(customer) });
+});
+
+// Only signs the customer out (an admin session in the same browser is left alone)
+app.post("/api/auth/logout", (req, res) => {
+  delete req.session.customerId;
+  res.json({ ok: true });
+});
+
+app.get("/api/account/orders", requireCustomer, (req, res) => {
+  const rows = db.prepare("SELECT * FROM orders WHERE customer_id=? ORDER BY created_at DESC").all(req.session.customerId);
+  res.json(rows.map(o => ({ id: o.id, status: o.status, total: o.total, created_at: o.created_at, items: JSON.parse(o.items) })));
 });
 
 /* =========================================
@@ -304,19 +495,7 @@ app.get("/api/admin/products", requireAdmin, (req, res) => {
   res.json(rows.map(p => ({ ...shapeProduct(p), active: !!p.active })));
 });
 
-// Accepts a JSON array string of image paths/URLs and keeps only safe values
-function parseImageList(value) {
-  try {
-    const arr = JSON.parse(value || "[]");
-    return Array.isArray(arr)
-      ? arr.filter(x => typeof x === "string" && (x.startsWith("/uploads/") || x.startsWith("https://")))
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function productInput(body, files = []) {
+function productInput(body) {
   const name = String(body.name || "").trim();
   const category = String(body.category || "").trim();
   const price = Number(body.price);
@@ -328,26 +507,12 @@ function productInput(body, files = []) {
     throw new Error("Enter a product name, valid category and price.");
   }
 
-  // 1) images kept from before, 2) optional pasted URL, 3) newly uploaded files
-  const images = parseImageList(body.existingImages);
-  const url = String(body.image || "").trim();
-  if (url && (url.startsWith("/uploads/") || url.startsWith("https://")) && !images.includes(url)) {
-    images.push(url);
-  }
-  for (const f of files) images.push("/uploads/" + f.filename);
-
-  if (images.length > MAX_IMAGES) {
-    throw new Error(`You can only have up to ${MAX_IMAGES} images per product.`);
-  }
-
   return {
     name,
     category,
     price,
     compare_price: body.compare_price ? Number(body.compare_price) : null,
     description: String(body.description || ""),
-    image: images[0] || "",
-    images: JSON.stringify(images),
     sizes: String(body.sizes || "S,M,L,XL").split(",").map(x => x.trim()).filter(Boolean).join(","),
     colors: String(body.colors || "").split(",").map(x => x.trim()).filter(Boolean).join(","),
     stock,
@@ -356,47 +521,94 @@ function productInput(body, files = []) {
   };
 }
 
-app.post("/api/admin/products", requireAdmin, upload.array("imageFiles", MAX_IMAGES), (req, res) => {
+// Works out the final ordered image list.
+// Admin sends imageOrder = JSON array of existing paths and "new:0", "new:1"... (index of uploaded file)
+function resolveImages(body, files, old) {
+  const oldList = old ? imagesOf(old) : [];
+  const newPaths = files.map(f => "/uploads/" + f.filename);
+  let final;
+
+  if (body.imageOrder !== undefined) {
+    final = [];
+    for (const token of parseList(body.imageOrder)) {
+      if (token.startsWith("new:")) {
+        const p = newPaths[Number(token.slice(4))];
+        if (p) final.push(p);
+      } else if (oldList.includes(token) || /^https?:\/\//i.test(token)) {
+        final.push(token);
+      }
+    }
+  } else if (body.existingImages !== undefined) {
+    // admin page that sends the kept images (JSON array) + new files (added last)
+    final = parseList(body.existingImages).filter(x =>
+      oldList.includes(x) || /^https?:\/\//i.test(x));
+    const url = String(body.image || "").trim();
+    if (/^https?:\/\//i.test(url) && !final.includes(url)) final.push(url);
+    final.push(...newPaths);
+  } else {
+    // oldest admin page: keep current images and add any new uploads
+    final = old ? [...oldList] : (body.image ? [String(body.image)] : []);
+    final.push(...newPaths);
+  }
+
+  final = [...new Set(final)];
+  if (final.length > MAX_IMAGES) {
+    throw new Error(`You can only have up to ${MAX_IMAGES} images per product.`);
+  }
+  return { final, newPaths, oldList };
+}
+
+app.post("/api/admin/products", requireAdmin, uploadImages, (req, res) => {
+  const files = uploadedFiles(req);
   try {
-    const p = productInput(req.body, req.files);
+    const p = productInput(req.body);
+    const { final, newPaths } = resolveImages(req.body, files, null);
+    p.image = final[0] || "";
+    p.images = JSON.stringify(final);
+
     const r = db.prepare(`INSERT INTO products(name,category,price,compare_price,description,image,images,sizes,colors,stock,featured,active)
       VALUES(@name,@category,@price,@compare_price,@description,@image,@images,@sizes,@colors,@stock,@featured,@active)`).run(p);
-    res.json({ ok: true, id: r.lastInsertRowid, images: JSON.parse(p.images) });
+
+    newPaths.filter(x => !final.includes(x)).forEach(removeUpload); // unused uploads
+    res.json({ ok: true, id: r.lastInsertRowid, images: final });
   } catch (e) {
-    cleanupFiles(req.files); // don't leave orphan files
+    files.forEach(f => removeUpload("/uploads/" + f.filename)); // don't leave orphan files
     res.status(400).json({ error: e.message });
   }
 });
 
-app.put("/api/admin/products/:id", requireAdmin, upload.array("imageFiles", MAX_IMAGES), (req, res) => {
+app.put("/api/admin/products/:id", requireAdmin, uploadImages, (req, res) => {
+  const files = uploadedFiles(req);
   try {
     const old = db.prepare("SELECT * FROM products WHERE id=?").get(req.params.id);
     if (!old) {
-      cleanupFiles(req.files);
+      files.forEach(f => removeUpload("/uploads/" + f.filename));
       return res.status(404).json({ error: "Product not found." });
     }
-    const p = productInput(req.body, req.files);
+    const p = productInput(req.body);
+    const { final, newPaths, oldList } = resolveImages(req.body, files, old);
+    p.image = final[0] || "";
+    p.images = JSON.stringify(final);
 
     db.prepare(`UPDATE products SET name=@name,category=@category,price=@price,compare_price=@compare_price,
-      description=@description,image=@image,images=@images,sizes=@sizes,colors=@colors,stock=@stock,
-      featured=@featured,active=@active WHERE id=@id`)
+      description=@description,image=@image,images=@images,sizes=@sizes,colors=@colors,stock=@stock,featured=@featured,active=@active WHERE id=@id`)
       .run({ ...p, id: old.id });
 
-    // Delete uploaded files that were removed from the gallery
-    const kept = new Set(JSON.parse(p.images));
-    parseImages(old).filter(img => !kept.has(img)).forEach(removeUpload);
+    // Remove images that were removed in the editor, and any unused uploads
+    oldList.filter(x => !final.includes(x)).forEach(removeUpload);
+    newPaths.filter(x => !final.includes(x)).forEach(removeUpload);
 
-    res.json({ ok: true, images: JSON.parse(p.images) });
+    res.json({ ok: true, images: final });
   } catch (e) {
-    cleanupFiles(req.files);
+    files.forEach(f => removeUpload("/uploads/" + f.filename));
     res.status(400).json({ error: e.message });
   }
 });
 
 app.delete("/api/admin/products/:id", requireAdmin, (req, res) => {
-  const old = db.prepare("SELECT image, images FROM products WHERE id=?").get(req.params.id);
+  const old = db.prepare("SELECT * FROM products WHERE id=?").get(req.params.id);
   db.prepare("DELETE FROM products WHERE id=?").run(req.params.id);
-  if (old) parseImages(old).forEach(removeUpload);
+  if (old) imagesOf(old).forEach(removeUpload);
   res.json({ ok: true });
 });
 

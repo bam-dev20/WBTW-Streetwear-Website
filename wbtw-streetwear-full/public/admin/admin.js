@@ -8,13 +8,6 @@ const $ = selector => document.querySelector(selector);
 let currentProducts = [];
 let currentOrders = [];
 
-const MAX_IMAGES = 8;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-
-// Gallery for the product editor.
-// Each item is either { kind: "existing", url } or { kind: "new", file, preview }
-let gallery = [];
-
 /* =========================================
    API HELPER
 ========================================= */
@@ -263,6 +256,7 @@ async function loadProducts() {
 function renderProducts() {
   $("#productRows").innerHTML = currentProducts.map(product => {
     const active = isTrue(product.active);
+    const imageCount = Array.isArray(product.images) ? product.images.length : 0;
 
     return `
       <tr>
@@ -272,12 +266,11 @@ function renderProducts() {
             <img
               src="${esc(product.image || "")}"
               alt="${esc(product.name)}"
-              onerror="this.style.display='none'"
             >
 
             <div>
               <strong>${esc(product.name)}</strong>
-              <small>ID #${esc(product.id)}</small>
+              <small>ID #${esc(product.id)}${imageCount > 1 ? ` · ${imageCount} images` : ""}</small>
             </div>
 
           </div>
@@ -323,127 +316,152 @@ function renderProducts() {
       </td>
     </tr>
   `;
-}
 
-/* =========================================
-   IMAGE GALLERY (up to 8 images)
-========================================= */
-
-function revokePreviews() {
-  gallery.forEach(item => {
-    if (item.kind === "new") URL.revokeObjectURL(item.preview);
+  // Hide broken images (inline onerror is blocked by the site's security policy)
+  $("#productRows").querySelectorAll("img").forEach(img => {
+    img.addEventListener("error", () => {
+      img.style.display = "none";
+    });
   });
 }
 
-function setGallery(items) {
-  revokePreviews();
+/* =========================================
+   PRODUCT IMAGES (multiple upload + preview)
+   Uses: #pickImages (button), #imageFiles (hidden file input),
+         #imagePreview (thumbnails), #imageCount (text)
+========================================= */
+
+const MAX_IMAGES = 8;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+// Each item: { kind: "existing", url } or { kind: "new", url (preview), file }
+let gallery = [];
+
+function resetGallery(items = []) {
+  gallery.forEach(item => {
+    if (item.kind === "new") URL.revokeObjectURL(item.url);
+  });
+
   gallery = items;
   renderGallery();
 }
 
 function renderGallery() {
   const box = $("#imagePreview");
+  const counter = $("#imageCount");
 
-  box.innerHTML = gallery.map((item, index) => {
-    const src = item.kind === "new" ? item.preview : item.url;
+  if (counter) {
+    counter.textContent =
+      `${gallery.length} / ${MAX_IMAGES} images. The first image is the main one.`;
+  }
 
-    return `
-      <div class="thumb" style="position:relative;aspect-ratio:1;background:#e5e3dd;overflow:hidden">
-        <img
-          src="${esc(src)}"
-          alt="Product image ${index + 1}"
-          style="width:100%;height:100%;object-fit:cover;display:block"
-        >
+  const pick = $("#pickImages");
+  if (pick) pick.disabled = gallery.length >= MAX_IMAGES;
 
-        ${index === 0 ? `
-          <span style="position:absolute;left:4px;bottom:4px;background:#000;color:#fff;font-size:10px;letter-spacing:.08em;padding:2px 6px">MAIN</span>
-        ` : `
-          <button
-            type="button"
-            data-main-image="${index}"
-            title="Make main image"
-            style="position:absolute;left:4px;bottom:4px;font-size:10px;padding:2px 6px;cursor:pointer"
-          >SET MAIN</button>
-        `}
+  if (!box) return;
 
-        <button
-          type="button"
-          data-remove-image="${index}"
-          title="Remove image"
-          aria-label="Remove image ${index + 1}"
-          style="position:absolute;right:4px;top:4px;width:22px;height:22px;line-height:1;padding:0;cursor:pointer"
-        >✕</button>
-      </div>
-    `;
-  }).join("");
+  const small =
+    "position:absolute;left:0;right:0;bottom:0;font-size:9px;padding:4px;text-align:center;";
 
-  $("#imageCount").textContent =
-    `${gallery.length} / ${MAX_IMAGES} images. The first image is the main one.`;
+  box.innerHTML = gallery.map((item, index) => `
+    <div class="thumb" style="position:relative">
+      <img
+        src="${esc(item.url)}"
+        alt="Product image ${index + 1}"
+        style="width:100%;aspect-ratio:3/4;object-fit:cover;display:block;background:#e5e3dd"
+      >
 
-  $("#pickImages").disabled = gallery.length >= MAX_IMAGES;
+      ${index === 0
+        ? `<span style="${small}background:#111;color:#fff;letter-spacing:.1em">MAIN</span>`
+        : `<button type="button" data-cover="${index}" style="${small}cursor:pointer">Make main</button>`}
+
+      <button
+        type="button"
+        data-remove="${index}"
+        aria-label="Remove image"
+        style="position:absolute;top:3px;right:3px;width:22px;height:22px;border:0;background:#111;color:#fff;cursor:pointer;line-height:1"
+      >✕</button>
+    </div>
+  `).join("");
 }
 
+function showEditorError(message) {
+  const box = $("#editorError");
+
+  if (box) {
+    box.textContent = message;
+  } else if (message) {
+    alert(message);
+  }
+}
+
+const pickButton = $("#pickImages");
+const imageInput = $("#imageFiles");
+const imagePreview = $("#imagePreview");
+
 // Open the file picker
-$("#pickImages").onclick = () => $("#imageFiles").click();
+if (pickButton && imageInput) {
+  pickButton.addEventListener("click", () => imageInput.click());
+}
 
-// Add chosen files to the gallery
-$("#imageFiles").addEventListener("change", event => {
-  const input = event.target;
-  const errorBox = $("#editorError");
+// Files chosen from the computer
+if (imageInput) {
+  imageInput.addEventListener("change", event => {
+    showEditorError("");
 
-  errorBox.textContent = "";
+    for (const file of event.target.files) {
+      if (gallery.length >= MAX_IMAGES) {
+        showEditorError(`You can add up to ${MAX_IMAGES} images.`);
+        break;
+      }
 
-  for (const file of input.files) {
-    if (gallery.length >= MAX_IMAGES) {
-      errorBox.textContent = `Maximum of ${MAX_IMAGES} images per product.`;
-      break;
+      if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
+        showEditorError(`${file.name} is not a JPG, PNG, WEBP or GIF image.`);
+        continue;
+      }
+
+      if (file.size > MAX_IMAGE_BYTES) {
+        showEditorError(`${file.name} is larger than 5 MB.`);
+        continue;
+      }
+
+      gallery.push({
+        kind: "new",
+        file,
+        url: URL.createObjectURL(file)
+      });
     }
 
-    if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
-      errorBox.textContent = `${file.name} is not a JPG, PNG, WEBP or GIF image.`;
-      continue;
+    // allow choosing the same file again
+    event.target.value = "";
+
+    renderGallery();
+  });
+}
+
+// Remove / make main
+if (imagePreview) {
+  imagePreview.addEventListener("click", event => {
+    const removeButton = event.target.closest("[data-remove]");
+    const coverButton = event.target.closest("[data-cover]");
+
+    if (removeButton) {
+      const [item] = gallery.splice(Number(removeButton.dataset.remove), 1);
+
+      if (item && item.kind === "new") {
+        URL.revokeObjectURL(item.url);
+      }
     }
 
-    if (file.size > MAX_IMAGE_BYTES) {
-      errorBox.textContent = `${file.name} is over 5 MB.`;
-      continue;
-    }
+    if (coverButton) {
+      const [item] = gallery.splice(Number(coverButton.dataset.cover), 1);
 
-    gallery.push({
-      kind: "new",
-      file,
-      preview: URL.createObjectURL(file)
-    });
-  }
-
-  input.value = "";
-  renderGallery();
-});
-
-// Remove image / set main image
-$("#imagePreview").addEventListener("click", event => {
-  const removeButton = event.target.closest("[data-remove-image]");
-  const mainButton = event.target.closest("[data-main-image]");
-
-  if (removeButton) {
-    const index = Number(removeButton.dataset.removeImage);
-    const [removed] = gallery.splice(index, 1);
-
-    if (removed && removed.kind === "new") {
-      URL.revokeObjectURL(removed.preview);
+      gallery.unshift(item);
     }
 
     renderGallery();
-  }
-
-  if (mainButton) {
-    const index = Number(mainButton.dataset.mainImage);
-    const [item] = gallery.splice(index, 1);
-
-    gallery.unshift(item);
-    renderGallery();
-  }
-});
+  });
+}
 
 /* =========================================
    PRODUCT EDITOR
@@ -456,10 +474,10 @@ function openEditor() {
 
   form.elements.id.value = "";
 
+  resetGallery([]);
+
   $("#editorTitle").textContent = "ADD PRODUCT";
   $("#editorError").textContent = "";
-
-  setGallery([]);
 
   $("#productEditor").classList.add("open");
 }
@@ -507,22 +525,19 @@ window.editProduct = id => {
   form.elements.featured.checked = isTrue(product.featured);
   form.elements.active.checked = isTrue(product.active);
 
-  // Load the product's current images into the gallery
-  const images = Array.isArray(product.images) && product.images.length
+  // Load the product's current images into the image manager
+  const existing = Array.isArray(product.images) && product.images.length
     ? product.images
     : (product.image ? [product.image] : []);
 
-  setGallery(images.map(url => ({ kind: "existing", url })));
+  resetGallery(existing.map(url => ({ kind: "existing", url })));
 };
 
 // Close editor
-function closeEditor() {
-  $("#productEditor").classList.remove("open");
-  setGallery([]);
-}
-
 document.querySelectorAll("[data-dismiss]").forEach(button => {
-  button.onclick = closeEditor;
+  button.onclick = () => {
+    $("#productEditor").classList.remove("open");
+  };
 });
 
 /* =========================================
@@ -595,21 +610,22 @@ $("#productForm").onsubmit = async event => {
     form.elements.active.checked ? "1" : "0"
   );
 
-  // Images: kept ones as a list (in order), new ones as files
+  // Images: send new files + the final order (existing paths and "new:0", "new:1"...)
+  formData.delete("image");
+  formData.delete("imageFile");
   formData.delete("imageFiles");
 
-  formData.set(
-    "existingImages",
-    JSON.stringify(
-      gallery
-        .filter(item => item.kind === "existing")
-        .map(item => item.url)
-    )
-  );
+  let newIndex = 0;
 
-  gallery
-    .filter(item => item.kind === "new")
-    .forEach(item => formData.append("imageFiles", item.file));
+  const order = gallery.map(item => {
+    if (item.kind === "existing") return item.url;
+
+    formData.append("imageFiles", item.file);
+
+    return "new:" + newIndex++;
+  });
+
+  formData.set("imageOrder", JSON.stringify(order));
 
   const id = form.elements.id.value;
 
@@ -618,6 +634,7 @@ $("#productForm").onsubmit = async event => {
     : "/api/admin/products";
 
   submitButton.disabled = true;
+  submitButton.textContent = "SAVING...";
 
   try {
     await api(url, {
@@ -625,7 +642,7 @@ $("#productForm").onsubmit = async event => {
       body: formData
     });
 
-    closeEditor();
+    $("#productEditor").classList.remove("open");
 
     await loadProducts();
 
@@ -634,6 +651,7 @@ $("#productForm").onsubmit = async event => {
 
   } finally {
     submitButton.disabled = false;
+    submitButton.textContent = "SAVE PRODUCT";
   }
 };
 
