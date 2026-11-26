@@ -1,4 +1,3 @@
-
 /* =========================================
    WBTW ADMIN DASHBOARD
    admin.js
@@ -8,6 +7,13 @@ const $ = selector => document.querySelector(selector);
 
 let currentProducts = [];
 let currentOrders = [];
+
+const MAX_IMAGES = 8;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+// Gallery for the product editor.
+// Each item is either { kind: "existing", url } or { kind: "new", file, preview }
+let gallery = [];
 
 /* =========================================
    API HELPER
@@ -320,6 +326,126 @@ function renderProducts() {
 }
 
 /* =========================================
+   IMAGE GALLERY (up to 8 images)
+========================================= */
+
+function revokePreviews() {
+  gallery.forEach(item => {
+    if (item.kind === "new") URL.revokeObjectURL(item.preview);
+  });
+}
+
+function setGallery(items) {
+  revokePreviews();
+  gallery = items;
+  renderGallery();
+}
+
+function renderGallery() {
+  const box = $("#imagePreview");
+
+  box.innerHTML = gallery.map((item, index) => {
+    const src = item.kind === "new" ? item.preview : item.url;
+
+    return `
+      <div class="thumb" style="position:relative;aspect-ratio:1;background:#e5e3dd;overflow:hidden">
+        <img
+          src="${esc(src)}"
+          alt="Product image ${index + 1}"
+          style="width:100%;height:100%;object-fit:cover;display:block"
+        >
+
+        ${index === 0 ? `
+          <span style="position:absolute;left:4px;bottom:4px;background:#000;color:#fff;font-size:10px;letter-spacing:.08em;padding:2px 6px">MAIN</span>
+        ` : `
+          <button
+            type="button"
+            data-main-image="${index}"
+            title="Make main image"
+            style="position:absolute;left:4px;bottom:4px;font-size:10px;padding:2px 6px;cursor:pointer"
+          >SET MAIN</button>
+        `}
+
+        <button
+          type="button"
+          data-remove-image="${index}"
+          title="Remove image"
+          aria-label="Remove image ${index + 1}"
+          style="position:absolute;right:4px;top:4px;width:22px;height:22px;line-height:1;padding:0;cursor:pointer"
+        >✕</button>
+      </div>
+    `;
+  }).join("");
+
+  $("#imageCount").textContent =
+    `${gallery.length} / ${MAX_IMAGES} images. The first image is the main one.`;
+
+  $("#pickImages").disabled = gallery.length >= MAX_IMAGES;
+}
+
+// Open the file picker
+$("#pickImages").onclick = () => $("#imageFiles").click();
+
+// Add chosen files to the gallery
+$("#imageFiles").addEventListener("change", event => {
+  const input = event.target;
+  const errorBox = $("#editorError");
+
+  errorBox.textContent = "";
+
+  for (const file of input.files) {
+    if (gallery.length >= MAX_IMAGES) {
+      errorBox.textContent = `Maximum of ${MAX_IMAGES} images per product.`;
+      break;
+    }
+
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
+      errorBox.textContent = `${file.name} is not a JPG, PNG, WEBP or GIF image.`;
+      continue;
+    }
+
+    if (file.size > MAX_IMAGE_BYTES) {
+      errorBox.textContent = `${file.name} is over 5 MB.`;
+      continue;
+    }
+
+    gallery.push({
+      kind: "new",
+      file,
+      preview: URL.createObjectURL(file)
+    });
+  }
+
+  input.value = "";
+  renderGallery();
+});
+
+// Remove image / set main image
+$("#imagePreview").addEventListener("click", event => {
+  const removeButton = event.target.closest("[data-remove-image]");
+  const mainButton = event.target.closest("[data-main-image]");
+
+  if (removeButton) {
+    const index = Number(removeButton.dataset.removeImage);
+    const [removed] = gallery.splice(index, 1);
+
+    if (removed && removed.kind === "new") {
+      URL.revokeObjectURL(removed.preview);
+    }
+
+    renderGallery();
+  }
+
+  if (mainButton) {
+    const index = Number(mainButton.dataset.mainImage);
+    const [item] = gallery.splice(index, 1);
+
+    gallery.unshift(item);
+    renderGallery();
+  }
+});
+
+/* =========================================
    PRODUCT EDITOR
 ========================================= */
 
@@ -332,6 +458,8 @@ function openEditor() {
 
   $("#editorTitle").textContent = "ADD PRODUCT";
   $("#editorError").textContent = "";
+
+  setGallery([]);
 
   $("#productEditor").classList.add("open");
 }
@@ -362,8 +490,7 @@ window.editProduct = id => {
     "price",
     "compare_price",
     "stock",
-    "description",
-    "image"
+    "description"
   ];
 
   fields.forEach(key => {
@@ -379,13 +506,23 @@ window.editProduct = id => {
 
   form.elements.featured.checked = isTrue(product.featured);
   form.elements.active.checked = isTrue(product.active);
+
+  // Load the product's current images into the gallery
+  const images = Array.isArray(product.images) && product.images.length
+    ? product.images
+    : (product.image ? [product.image] : []);
+
+  setGallery(images.map(url => ({ kind: "existing", url })));
 };
 
 // Close editor
+function closeEditor() {
+  $("#productEditor").classList.remove("open");
+  setGallery([]);
+}
+
 document.querySelectorAll("[data-dismiss]").forEach(button => {
-  button.onclick = () => {
-    $("#productEditor").classList.remove("open");
-  };
+  button.onclick = closeEditor;
 });
 
 /* =========================================
@@ -458,6 +595,22 @@ $("#productForm").onsubmit = async event => {
     form.elements.active.checked ? "1" : "0"
   );
 
+  // Images: kept ones as a list (in order), new ones as files
+  formData.delete("imageFiles");
+
+  formData.set(
+    "existingImages",
+    JSON.stringify(
+      gallery
+        .filter(item => item.kind === "existing")
+        .map(item => item.url)
+    )
+  );
+
+  gallery
+    .filter(item => item.kind === "new")
+    .forEach(item => formData.append("imageFiles", item.file));
+
   const id = form.elements.id.value;
 
   const url = id
@@ -472,7 +625,7 @@ $("#productForm").onsubmit = async event => {
       body: formData
     });
 
-    $("#productEditor").classList.remove("open");
+    closeEditor();
 
     await loadProducts();
 
