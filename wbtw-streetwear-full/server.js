@@ -17,20 +17,43 @@ app.set("trust proxy", 1);
 
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
+const isProduction = process.env.NODE_ENV === "production";
 
-// Create required folders if they don't exist
-fs.mkdirSync(path.join(ROOT, "data"), { recursive: true });
-fs.mkdirSync(path.join(ROOT, "uploads"), { recursive: true });
+/* =========================================
+   PERSISTENT STORAGE (Railway Volume at /data)
+========================================= */
+const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(ROOT, "data");
+const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 
-// Database file
-const db = new Database(path.join(ROOT, "data", "wbtw.sqlite"));
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// One-time copy of old local files into the volume (only if the volume is empty)
+const LEGACY_DB = path.join(ROOT, "data", "wbtw.sqlite");
+const NEW_DB = path.join(DATA_DIR, "wbtw.sqlite");
+if (DATA_DIR !== path.join(ROOT, "data") && !fs.existsSync(NEW_DB) && fs.existsSync(LEGACY_DB)) {
+  fs.copyFileSync(LEGACY_DB, NEW_DB);
+  console.log("Copied existing database into persistent volume.");
+}
+const LEGACY_UPLOADS = path.join(ROOT, "uploads");
+if (fs.existsSync(LEGACY_UPLOADS) && LEGACY_UPLOADS !== UPLOAD_DIR) {
+  for (const f of fs.readdirSync(LEGACY_UPLOADS)) {
+    const dest = path.join(UPLOAD_DIR, f);
+    if (!fs.existsSync(dest)) fs.copyFileSync(path.join(LEGACY_UPLOADS, f), dest);
+  }
+}
+
+/* =========================================
+   DATABASE
+========================================= */
+const db = new Database(NEW_DB);
 db.pragma("journal_mode = WAL");
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS products (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  category TEXT NOT NULL CHECK(category IN ('Shirts','Hoodies')),
+  category TEXT NOT NULL CHECK(category IN ('Shirts','T-Shirts','Hoodies')),
   price REAL NOT NULL,
   compare_price REAL DEFAULT NULL,
   description TEXT DEFAULT '',
@@ -59,6 +82,35 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 `);
 
+// Migration: older databases only allowed 'Shirts' and 'Hoodies'
+const productsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'").get();
+if (productsSql && !productsSql.sql.includes("T-Shirts")) {
+  const cols = "id,name,category,price,compare_price,description,image,sizes,colors,stock,featured,active,created_at";
+  db.transaction(() => {
+    db.exec(`
+      ALTER TABLE products RENAME TO products_old;
+      CREATE TABLE products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL CHECK(category IN ('Shirts','T-Shirts','Hoodies')),
+        price REAL NOT NULL,
+        compare_price REAL DEFAULT NULL,
+        description TEXT DEFAULT '',
+        image TEXT DEFAULT '',
+        sizes TEXT DEFAULT 'S,M,L,XL',
+        colors TEXT DEFAULT '',
+        stock INTEGER DEFAULT 0,
+        featured INTEGER DEFAULT 0,
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO products(${cols}) SELECT ${cols} FROM products_old;
+      DROP TABLE products_old;
+    `);
+  })();
+  console.log("Migrated products table to allow T-Shirts.");
+}
+
 const adminUser = process.env.ADMIN_USERNAME || "admin";
 const adminPass = process.env.ADMIN_PASSWORD || "ChangeThisPassword123!";
 if (!db.prepare("SELECT id FROM admins WHERE username=?").get(adminUser)) {
@@ -76,9 +128,9 @@ if (!count) {
   seed.run("Core Pullover Hoodie","Hoodies",1199,"Minimal design. Everyday comfort.","https://images.unsplash.com/photo-1578681994506-b8f463449011?auto=format&fit=crop&w=1000&q=85","S,M,L,XL","Black,Grey",12,0);
 }
 
-
-const isProduction = process.env.NODE_ENV === "production";
-
+/* =========================================
+   MIDDLEWARE
+========================================= */
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
 
@@ -86,121 +138,236 @@ app.use(helmet({
   strictTransportSecurity: isProduction ? undefined : false,
 
   contentSecurityPolicy: {
+    useDefaults: true,
     directives: {
+      // allow own images, uploads, previews (blob:) and external https images
+      "img-src": ["'self'", "data:", "blob:", "https:"],
       "upgrade-insecure-requests": isProduction ? [] : null
     }
   }
 }));
-app.use(express.json({limit:"2mb"}));
-app.use(express.urlencoded({extended:true}));
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  store: new SQLiteStore({ db: "sessions.sqlite", dir: path.join(ROOT,"data") }),
+  store: new SQLiteStore({ db: "sessions.sqlite", dir: DATA_DIR }),
   secret: process.env.SESSION_SECRET || "development-only-change-me",
-  resave: false, saveUninitialized: false,
-  cookie: { httpOnly:true, sameSite:"lax", secure: process.env.NODE_ENV === "production", maxAge: 8*60*60*1000 }
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProduction,
+    maxAge: 8 * 60 * 60 * 1000
+  }
 }));
-app.use("/uploads", express.static(path.join(ROOT,"uploads")));
-app.use(express.static(path.join(ROOT,"public")));
 
-const loginLimiter = rateLimit({windowMs:15*60*1000,limit:8,standardHeaders:true,legacyHeaders:false});
+app.use("/uploads", express.static(UPLOAD_DIR, { dotfiles: "deny", index: false }));
+app.use(express.static(path.join(ROOT, "public")));
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 8,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+/* =========================================
+   IMAGE UPLOAD (saved to the persistent volume)
+========================================= */
 const storage = multer.diskStorage({
-  destination: (req,file,cb)=>cb(null,path.join(ROOT,"uploads")),
-  filename: (req,file,cb)=>cb(null,Date.now()+"-"+Math.round(Math.random()*1e9)+path.extname(file.originalname).toLowerCase())
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) =>
+    cb(null, Date.now() + "-" + Math.round(Math.random() * 1e9) + path.extname(file.originalname).toLowerCase())
 });
 const upload = multer({
   storage,
-  limits:{fileSize:5*1024*1024},
-  fileFilter:(req,file,cb)=>{
-    const ok=/^image\/(jpeg|png|webp|gif)$/.test(file.mimetype);
-    cb(ok?null:new Error("Only JPG, PNG, WEBP or GIF images are allowed."),ok);
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype);
+    cb(ok ? null : new Error("Only JPG, PNG, WEBP or GIF images are allowed."), ok);
   }
 });
-function requireAdmin(req,res,next){ if(req.session.adminId) return next(); return res.status(401).json({error:"Please sign in again."}); }
 
-app.get("/api/products",(req,res)=>{
-  const rows=db.prepare("SELECT * FROM products WHERE active=1 ORDER BY featured DESC, created_at DESC").all();
-  res.json(rows.map(p=>({...p,sizes:p.sizes.split(",").filter(Boolean),colors:p.colors.split(",").filter(Boolean),featured:!!p.featured})));
-});
-app.get("/api/products/:id",(req,res)=>{
-  const p=db.prepare("SELECT * FROM products WHERE id=? AND active=1").get(req.params.id);
-  if(!p) return res.status(404).json({error:"Product not found"});
-  res.json({...p,sizes:p.sizes.split(",").filter(Boolean),colors:p.colors.split(",").filter(Boolean),featured:!!p.featured});
-});
-app.post("/api/orders",(req,res)=>{
-  const {customer_name,phone,address="",items}=req.body||{};
-  if(!customer_name||!phone||!Array.isArray(items)||!items.length) return res.status(400).json({error:"Please provide your name, phone number and cart items."});
-  let total=0, clean=[];
-  for(const item of items){
-    const p=db.prepare("SELECT id,name,price,stock,active FROM products WHERE id=?").get(Number(item.id));
-    const qty=Math.max(1,Math.min(20,Number(item.qty)||1));
-    if(!p||!p.active||p.stock<qty) return res.status(400).json({error:`Not enough stock for ${p?.name||"one item"}.`});
-    total+=p.price*qty; clean.push({id:p.id,name:p.name,price:p.price,qty,size:String(item.size||"")});
-  }
-  const result=db.prepare("INSERT INTO orders(customer_name,phone,address,items,total) VALUES(?,?,?,?,?)")
-    .run(customer_name,phone,address,JSON.stringify(clean),total);
-  for(const item of clean) db.prepare("UPDATE products SET stock=stock-? WHERE id=?").run(item.qty,item.id);
-  res.json({ok:true,orderId:result.lastInsertRowid,total});
-});
-
-app.post("/api/admin/login",loginLimiter,(req,res)=>{
-  const {username,password}=req.body||{};
-  const user=db.prepare("SELECT * FROM admins WHERE username=?").get(username||"");
-  if(!user||!bcrypt.compareSync(password||"",user.password_hash)) return res.status(401).json({error:"Incorrect username or password."});
-  req.session.adminId=user.id;
-  req.session.username=user.username;
-  res.json({ok:true,username:user.username});
-});
-app.post("/api/admin/logout",requireAdmin,(req,res)=>req.session.destroy(()=>res.json({ok:true})));
-app.get("/api/admin/me",(req,res)=>res.json({authenticated:!!req.session.adminId,username:req.session.username||""}));
-app.get("/api/admin/products",requireAdmin,(req,res)=>{
-  const rows=db.prepare("SELECT * FROM products ORDER BY created_at DESC").all();
-  res.json(rows.map(p=>({...p,sizes:p.sizes.split(",").filter(Boolean),colors:p.colors.split(",").filter(Boolean),featured:!!p.featured,active:!!p.active})));
-});
-function productInput(body,file){
-  const name=String(body.name||"").trim(), category=String(body.category||"");
-  const price=Number(body.price), stock=Math.max(0,parseInt(body.stock||"0",10)||0);
-  if(!name||!["Shirts","Hoodies"].includes(category)||!Number.isFinite(price)||price<0) throw new Error("Enter a product name, valid category and price.");
-  return {name,category,price,compare_price:body.compare_price?Number(body.compare_price):null,
-    description:String(body.description||""),image:file?"/uploads/"+file.filename:String(body.image||""),
-    sizes:String(body.sizes||"S,M,L,XL").split(",").map(x=>x.trim()).filter(Boolean).join(","),
-    colors:String(body.colors||"").split(",").map(x=>x.trim()).filter(Boolean).join(","),
-    stock,featured:body.featured==="1"||body.featured==="true"?1:0,active:body.active==="0"?0:1};
+// Delete a stored upload file (only files inside /uploads/)
+function removeUpload(imagePath) {
+  if (typeof imagePath !== "string" || !imagePath.startsWith("/uploads/")) return;
+  const file = path.join(UPLOAD_DIR, path.basename(imagePath));
+  fs.unlink(file, () => {});
 }
-app.post("/api/admin/products",requireAdmin,upload.single("imageFile"),(req,res)=>{
-  try{
-    const p=productInput(req.body,req.file);
-    const r=db.prepare(`INSERT INTO products(name,category,price,compare_price,description,image,sizes,colors,stock,featured,active)
-      VALUES(@name,@category,@price,@compare_price,@description,@image,@sizes,@colors,@stock,@featured,@active)`).run(p);
-    res.json({ok:true,id:r.lastInsertRowid});
-  }catch(e){res.status(400).json({error:e.message});}
+
+function requireAdmin(req, res, next) {
+  if (req.session.adminId) return next();
+  return res.status(401).json({ error: "Please sign in again." });
+}
+
+/* =========================================
+   PUBLIC API
+========================================= */
+const shapeProduct = p => ({
+  ...p,
+  sizes: p.sizes.split(",").filter(Boolean),
+  colors: p.colors.split(",").filter(Boolean),
+  featured: !!p.featured
 });
-app.put("/api/admin/products/:id",requireAdmin,upload.single("imageFile"),(req,res)=>{
-  try{
-    const old=db.prepare("SELECT * FROM products WHERE id=?").get(req.params.id);
-    if(!old)return res.status(404).json({error:"Product not found."});
-    const p=productInput(req.body,req.file);
-    if(!req.file&&!req.body.image)p.image=old.image;
+
+app.get("/api/products", (req, res) => {
+  const rows = db.prepare("SELECT * FROM products WHERE active=1 ORDER BY featured DESC, created_at DESC").all();
+  res.json(rows.map(shapeProduct));
+});
+
+app.get("/api/products/:id", (req, res) => {
+  const p = db.prepare("SELECT * FROM products WHERE id=? AND active=1").get(req.params.id);
+  if (!p) return res.status(404).json({ error: "Product not found" });
+  res.json(shapeProduct(p));
+});
+
+app.post("/api/orders", (req, res) => {
+  const { customer_name, phone, address = "", items } = req.body || {};
+  if (!customer_name || !phone || !Array.isArray(items) || !items.length)
+    return res.status(400).json({ error: "Please provide your name, phone number and cart items." });
+
+  let total = 0;
+  const clean = [];
+  for (const item of items) {
+    const p = db.prepare("SELECT id,name,price,stock,active FROM products WHERE id=?").get(Number(item.id));
+    const qty = Math.max(1, Math.min(20, Number(item.qty) || 1));
+    if (!p || !p.active || p.stock < qty)
+      return res.status(400).json({ error: `Not enough stock for ${p?.name || "one item"}.` });
+    total += p.price * qty;
+    clean.push({ id: p.id, name: p.name, price: p.price, qty, size: String(item.size || "") });
+  }
+  const result = db.prepare("INSERT INTO orders(customer_name,phone,address,items,total) VALUES(?,?,?,?,?)")
+    .run(customer_name, phone, address, JSON.stringify(clean), total);
+  for (const item of clean)
+    db.prepare("UPDATE products SET stock=stock-? WHERE id=?").run(item.qty, item.id);
+  res.json({ ok: true, orderId: result.lastInsertRowid, total });
+});
+
+/* =========================================
+   ADMIN AUTH
+========================================= */
+app.post("/api/admin/login", loginLimiter, (req, res) => {
+  const { username, password } = req.body || {};
+  const user = db.prepare("SELECT * FROM admins WHERE username=?").get(username || "");
+  if (!user || !bcrypt.compareSync(password || "", user.password_hash))
+    return res.status(401).json({ error: "Incorrect username or password." });
+  req.session.adminId = user.id;
+  req.session.username = user.username;
+  res.json({ ok: true, username: user.username });
+});
+app.post("/api/admin/logout", requireAdmin, (req, res) => req.session.destroy(() => res.json({ ok: true })));
+app.get("/api/admin/me", (req, res) =>
+  res.json({ authenticated: !!req.session.adminId, username: req.session.username || "" }));
+
+/* =========================================
+   ADMIN PRODUCTS
+========================================= */
+app.get("/api/admin/products", requireAdmin, (req, res) => {
+  const rows = db.prepare("SELECT * FROM products ORDER BY created_at DESC").all();
+  res.json(rows.map(p => ({ ...shapeProduct(p), active: !!p.active })));
+});
+
+function productInput(body, file) {
+  const name = String(body.name || "").trim();
+  const category = String(body.category || "").trim();
+  const price = Number(body.price);
+  const stock = Math.max(0, parseInt(body.stock || "0", 10) || 0);
+
+  const validCategories = ["Shirts", "T-Shirts", "Hoodies"];
+
+  if (!name || !validCategories.includes(category) || !Number.isFinite(price) || price < 0) {
+    throw new Error("Enter a product name, valid category and price.");
+  }
+
+  return {
+    name,
+    category,
+    price,
+    compare_price: body.compare_price ? Number(body.compare_price) : null,
+    description: String(body.description || ""),
+    image: file ? "/uploads/" + file.filename : String(body.image || ""),
+    sizes: String(body.sizes || "S,M,L,XL").split(",").map(x => x.trim()).filter(Boolean).join(","),
+    colors: String(body.colors || "").split(",").map(x => x.trim()).filter(Boolean).join(","),
+    stock,
+    featured: body.featured === "1" || body.featured === "true" ? 1 : 0,
+    active: body.active === "0" ? 0 : 1
+  };
+}
+
+app.post("/api/admin/products", requireAdmin, upload.single("imageFile"), (req, res) => {
+  try {
+    const p = productInput(req.body, req.file);
+    const r = db.prepare(`INSERT INTO products(name,category,price,compare_price,description,image,sizes,colors,stock,featured,active)
+      VALUES(@name,@category,@price,@compare_price,@description,@image,@sizes,@colors,@stock,@featured,@active)`).run(p);
+    res.json({ ok: true, id: r.lastInsertRowid, image: p.image });
+  } catch (e) {
+    if (req.file) removeUpload("/uploads/" + req.file.filename); // don't leave orphan files
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put("/api/admin/products/:id", requireAdmin, upload.single("imageFile"), (req, res) => {
+  try {
+    const old = db.prepare("SELECT * FROM products WHERE id=?").get(req.params.id);
+    if (!old) {
+      if (req.file) removeUpload("/uploads/" + req.file.filename);
+      return res.status(404).json({ error: "Product not found." });
+    }
+    const p = productInput(req.body, req.file);
+    if (!req.file && !req.body.image) p.image = old.image;
+
     db.prepare(`UPDATE products SET name=@name,category=@category,price=@price,compare_price=@compare_price,
       description=@description,image=@image,sizes=@sizes,colors=@colors,stock=@stock,featured=@featured,active=@active WHERE id=@id`)
-      .run({...p,id:old.id});
-    res.json({ok:true});
-  }catch(e){res.status(400).json({error:e.message});}
+      .run({ ...p, id: old.id });
+
+    // Remove the previous uploaded image once it has been replaced
+    if (p.image !== old.image) removeUpload(old.image);
+
+    res.json({ ok: true, image: p.image });
+  } catch (e) {
+    if (req.file) removeUpload("/uploads/" + req.file.filename);
+    res.status(400).json({ error: e.message });
+  }
 });
-app.delete("/api/admin/products/:id",requireAdmin,(req,res)=>{
-  db.prepare("DELETE FROM products WHERE id=?").run(req.params.id);res.json({ok:true});
+
+app.delete("/api/admin/products/:id", requireAdmin, (req, res) => {
+  const old = db.prepare("SELECT image FROM products WHERE id=?").get(req.params.id);
+  db.prepare("DELETE FROM products WHERE id=?").run(req.params.id);
+  if (old) removeUpload(old.image);
+  res.json({ ok: true });
 });
-app.get("/api/admin/orders",requireAdmin,(req,res)=>{
-  const rows=db.prepare("SELECT * FROM orders ORDER BY created_at DESC").all();
-  res.json(rows.map(o=>({...o,items:JSON.parse(o.items)})));
+
+/* =========================================
+   ADMIN ORDERS
+========================================= */
+app.get("/api/admin/orders", requireAdmin, (req, res) => {
+  const rows = db.prepare("SELECT * FROM orders ORDER BY created_at DESC").all();
+  res.json(rows.map(o => ({ ...o, items: JSON.parse(o.items) })));
 });
-app.patch("/api/admin/orders/:id",requireAdmin,(req,res)=>{
-  const status=String(req.body.status||"");
-  if(!["Pending","Confirmed","Processing","Shipped","Completed","Cancelled"].includes(status))return res.status(400).json({error:"Invalid status."});
-  db.prepare("UPDATE orders SET status=? WHERE id=?").run(status,req.params.id);res.json({ok:true});
+
+app.patch("/api/admin/orders/:id", requireAdmin, (req, res) => {
+  const status = String(req.body.status || "");
+  if (!["Pending", "Confirmed", "Processing", "Shipped", "Completed", "Cancelled"].includes(status))
+    return res.status(400).json({ error: "Invalid status." });
+  db.prepare("UPDATE orders SET status=? WHERE id=?").run(status, req.params.id);
+  res.json({ ok: true });
 });
-app.get("/admin",(req,res)=>res.sendFile(path.join(ROOT,"public","admin","index.html")));
-app.get("/health",(req,res)=>res.json({ok:true}));
-app.use((err,req,res,next)=>{console.error(err);res.status(400).json({error:err.message||"Something went wrong."});});
+
+/* =========================================
+   PAGES & ERRORS
+========================================= */
+app.get("/admin", (req, res) => res.sendFile(path.join(ROOT, "public", "admin", "index.html")));
+app.get("/health", (req, res) => res.json({ ok: true }));
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  const message = err.code === "LIMIT_FILE_SIZE"
+    ? "Image is too large. Maximum size is 5 MB."
+    : err.message || "Something went wrong.";
+  res.status(400).json({ error: message });
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`WBTW store running on port ${PORT}`);
+  console.log(`Data directory: ${DATA_DIR}`);
 });
